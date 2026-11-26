@@ -16,6 +16,12 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isUpdateAdmin() {
+      return isSignedIn() &&
+             request.auth.token.email_verified == true &&
+             request.auth.token.email == 'the.shekharkumaryadavofficial@gmail.com';
+    }
+
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -105,6 +111,44 @@ service cloud.firestore {
              data.dateLabel is string && data.dateLabel.size() <= 30 &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidAppUpdateConfig(data) {
+      return data.latestVersionCode is int && data.latestVersionCode >= 1 && data.latestVersionCode <= 100000 &&
+             data.latestVersionName is string && data.latestVersionName.size() >= 1 && data.latestVersionName.size() <= 30 &&
+             data.releaseNotes is string && data.releaseNotes.size() <= 1000 &&
+             data.downloadUrl is string && data.downloadUrl.size() <= 500 &&
+             (data.downloadUrl == '' || data.downloadUrl.matches('^https://.*')) &&
+             data.forceUpdate is bool &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    // 0. Firebase App Update Config Document
+    match /app_config/{docId} {
+      allow get: if isSignedIn() && docId == 'update';
+      allow list: if false;
+
+      allow create: if isUpdateAdmin() &&
+                       docId == 'update' &&
+                       incoming().keys().hasAll([
+                         'latestVersionCode', 'latestVersionName', 'releaseNotes',
+                         'downloadUrl', 'forceUpdate', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'latestVersionCode', 'latestVersionName', 'releaseNotes',
+                         'downloadUrl', 'forceUpdate', 'updatedAt'
+                       ]) &&
+                       isValidAppUpdateConfig(incoming());
+
+      allow update: if isUpdateAdmin() &&
+                       docId == 'update' &&
+                       isValidAppUpdateConfig(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'latestVersionCode', 'latestVersionName', 'releaseNotes',
+                         'downloadUrl', 'forceUpdate', 'updatedAt'
+                       ]);
+
+      allow delete: if false;
     }
 
     // 1. User Profile Document

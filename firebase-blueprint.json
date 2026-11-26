@@ -349,9 +349,53 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "AppUpdateConfig": {
+      "title": "AppUpdateConfig",
+      "description": "Firebase-managed app update metadata stored at /app_config/update.",
+      "type": "object",
+      "properties": {
+        "latestVersionCode": {
+          "type": "integer",
+          "description": "Latest Android versionCode available."
+        },
+        "latestVersionName": {
+          "type": "string",
+          "description": "Human-readable latest version name such as 1.1."
+        },
+        "releaseNotes": {
+          "type": "string",
+          "description": "Summary of what is new in this release."
+        },
+        "downloadUrl": {
+          "type": "string",
+          "description": "HTTPS URL pointing to the latest release or APK download page."
+        },
+        "forceUpdate": {
+          "type": "boolean",
+          "description": "Whether the update should be highlighted as urgent."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "latestVersionCode",
+        "latestVersionName",
+        "releaseNotes",
+        "downloadUrl",
+        "forceUpdate",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
+    "/app_config/{docId}": {
+      "schema": { "$ref": "#/entities/AppUpdateConfig" },
+      "description": "App update metadata document (docId = 'update')."
+    },
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
       "description": "Authenticated user's LifeOS profile and daily summary metrics."

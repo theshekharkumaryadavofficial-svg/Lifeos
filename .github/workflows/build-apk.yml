@@ -8,6 +8,9 @@ on:
       - "**"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-apk:
     name: Build Debug APK
@@ -43,13 +46,87 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
+      - name: Prepare google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -f app/google-services.json ]; then
+            echo "Using repository app/google-services.json"
+          elif [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            if echo "$GOOGLE_SERVICES_JSON" | grep -q '"project_info"'; then
+              printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+            else
+              echo "$GOOGLE_SERVICES_JSON" | base64 -d > app/google-services.json
+            fi
+            echo "Restored app/google-services.json from GitHub Secret GOOGLE_SERVICES_JSON"
+          else
+            echo "::warning::app/google-services.json not found in repo or GOOGLE_SERVICES_JSON secret. Writing CI fallback so APK compiles; add GOOGLE_SERVICES_JSON secret in GitHub Settings for live Firebase Sign-In & sync."
+            cat <<'EOF' > app/google-services.json
+          {
+            "project_info": {
+              "project_number": "100000000000",
+              "project_id": "lifeos-ci-placeholder",
+              "storage_bucket": "lifeos-ci-placeholder.firebasestorage.app"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:100000000000:android:0000000000000000000000",
+                  "android_client_info": {
+                    "package_name": "com.aistudio.lifeos.kqvxmr"
+                  }
+                },
+                "oauth_client": [
+                  {
+                    "client_id": "100000000000-ciplaceholderwebclient.apps.googleusercontent.com",
+                    "client_type": 3
+                  }
+                ],
+                "api_key": [
+                  {
+                    "current_key": "AIzaSyPlaceholderKeyForGitHubActionsCI000"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": [
+                      {
+                        "client_id": "100000000000-ciplaceholderwebclient.apps.googleusercontent.com",
+                        "client_type": 3
+                      }
+                    ]
+                  }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          EOF
+          fi
+
       - name: Build LifeOS APK
         run: gradle :app:assembleDebug --no-daemon
+
+      - name: Copy APK with clean filename
+        run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/LifeOS-latest.apk
 
       - name: Upload LifeOS APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: LifeOS-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/LifeOS-latest.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish Latest APK to GitHub Releases
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view latest >/dev/null 2>&1; then
+            gh release upload latest app/build/outputs/apk/debug/LifeOS-latest.apk --clobber
+          else
+            gh release create latest app/build/outputs/apk/debug/LifeOS-latest.apk \
+              --title "LifeOS Latest APK" \
+              --notes "Latest automatically built LifeOS Android APK."
+          fi

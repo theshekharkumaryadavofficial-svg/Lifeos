@@ -276,3 +276,61 @@ test("Subjects, Notes, Workouts, and SadhanaLogs CRUD parity", async () => {
   await assertSucceeds(userDoc.collection("workouts").get());
   await assertSucceeds(userDoc.collection("sadhanaLogs").get());
 });
+
+test("AppUpdateConfig: signed-in read, verified-admin write only, spoofing & non-HTTPS denied", async () => {
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const regularDb = testEnv
+    .authenticatedContext(ALICE_UID, { email: "other@example.com", email_verified: true })
+    .firestore();
+  const spoofedAdminDb = testEnv
+    .authenticatedContext("spoof_uid", {
+      email: "the.shekharkumaryadavofficial@gmail.com",
+      email_verified: false,
+    })
+    .firestore();
+  const adminDb = testEnv
+    .authenticatedContext("admin_uid", {
+      email: "the.shekharkumaryadavofficial@gmail.com",
+      email_verified: true,
+    })
+    .firestore();
+
+  const validUpdate = {
+    latestVersionCode: 2,
+    latestVersionName: "1.1",
+    releaseNotes: "Bold typography and faster Naam Jap sync.",
+    downloadUrl: "https://github.com/example/Lifeos/releases/latest",
+    forceUpdate: false,
+    updatedAt: pastDate(1000),
+  };
+
+  // Unauthenticated, regular user, and unverified spoofed admin cannot write
+  await assertFails(unauthDb.collection("app_config").doc("update").set(validUpdate));
+  await assertFails(regularDb.collection("app_config").doc("update").set(validUpdate));
+  await assertFails(spoofedAdminDb.collection("app_config").doc("update").set(validUpdate));
+
+  // Non-HTTPS URL rejected even for admin
+  await assertFails(
+    adminDb.collection("app_config").doc("update").set({
+      ...validUpdate,
+      downloadUrl: "http://insecure.example.com/app.apk",
+    })
+  );
+
+  // Verified admin creates and updates config
+  await assertSucceeds(adminDb.collection("app_config").doc("update").set(validUpdate));
+  await assertSucceeds(
+    adminDb.collection("app_config").doc("update").update({
+      latestVersionCode: 3,
+      latestVersionName: "1.2",
+      updatedAt: pastDate(500),
+    })
+  );
+
+  // Regular signed-in user can read single update doc, cannot list or delete
+  await assertSucceeds(regularDb.collection("app_config").doc("update").get());
+  await assertFails(regularDb.collection("app_config").get());
+  await assertFails(unauthDb.collection("app_config").doc("update").get());
+  await assertFails(adminDb.collection("app_config").doc("update").delete());
+});
+
