@@ -1,0 +1,6 @@
+{
+  "name": "LifeOS",
+  "description": "All-in-one personal life management app for Study, AI Tutor, Naam Jap, Fitness, Tasks, and Progress Analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
