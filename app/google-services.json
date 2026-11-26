@@ -1,0 +1,222 @@
+        "android_client_info": {
+          "पैकेज_नाम": "com.aistudio.dhruvai.jarvis"
+        }
+      },
+      "ओऑथ_क्लाइंट": [
+        {
+          "client_id": "8563560529-npq8trk7di8kr3ou3idvlqjnfn8vpsg0.apps.googleusercontent.com",
+          "क्लाइंट_टाइप": 1,
+          "एंड्रॉइड_इन्फो": {
+            "पैकेज_नाम": "कॉम.ऐस्टूडियो.ध्रुवाई.जार्विस",
+            "certificate_hash": "583bf55ea7197dac0240ff4a766e9070d35122e0"
+          }
+        },
+        {
+          "client_id": "8563560529-itkpufrpj07g4645cmq8vn150crdt2ak.apps.googleusercontent.com",
+          "क्लाइंट_टाइप": 3
+        }
+      ],
+      "एपीआई_की": [
+        {
+          "current_key": "AIzaSyC4F7MOtNbghqRr0u5-6zwgodaiWoOfOcg"
+        }
+      ],
+      "सेवाएं": {
+        "ऐपइनवाइट_सर्विस": {
+          "अन्य_प्लेटफ़ॉर्म_ओऑथ_क्लाइंट": [
+            {
+              "client_id": "8563560529-itkpufrpj07g4645cmq8vn150crdt2ak.apps.googleusercontent.com",
+              "क्लाइंट_टाइप": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "क्लाइंट_इन्फो": {
+        "mobilesdk_app_id": "1:8563560529:android:58d35ddafbc24ef7726870",
+        "android_client_info": {
+          "पैकेज_नाम": "com.aistudio.dhruvai.kxmzqr"
+        }
+      },
+      "ओऑथ_क्लाइंट": [
+        {
+          "client_id": "8563560529-ofjef2qe67psomj479grqt4o103b09lh.apps.googleusercontent.com",
+          "क्लाइंट_टाइप": 1,
+          "एंड्रॉइड_इन्फो": {
+            "पैकेज_नाम": "com.aistudio.dhruvai.kxmzqr",
+            "certificate_hash": "a0e994e37b3c98ea814a71864ecaa49529a0d784"
+          }
+        },
+        {
+          "client_id": "8563560529-itkpufrpj07g4645cmq8vn150crdt2ak.apps.googleusercontent.com",
+          "क्लाइंट_टाइप": 3
+        }
+      ],
+      "एपीआई_की": [
+        {
+          "current_key": "AIzaSyC4F7MOtNbghqRr0u5-6zwgodaiWoOfOcg"
+        }
+      ],
+      "सेवाएं": {
+        "ऐपइनवाइट_सर्विस": {
+          "अन्य_प्लेटफ़ॉर्म_ओऑथ_क्लाइंट": [
+            {
+              "client_id": "8563560529-itkpufrpj07g4645cmq8vn150crdt2ak.apps.googleusercontent.com",
+              "क्लाइंट_टाइप": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "क्लाइंट_इन्फो": {
+        "mobilesdk_app_id": "1:8563560529:android:07fb3b7ae456d1c0726870",
+        "android_client_info": {
+          "पैकेज_नाम": "com.aistudio.dhruvai.kzmvtr"
+        }
+      },
+      "ओऑथ_क्लाइंट": [
+        {
+          "client_id": "8563560529-8a08ar6l4eu5oramdqpo6v4blltgj2kf.apps.googleusercontent.com",
+          "क्लाइंट_टाइप": 1,
+          "एंड्रॉइड_इन्फो": {
+            "package_name": "com.aistudio.dhruvai.kzmvtr",
+            "certificate_hash": "7b0d29dc034dda1e3ca0bf81b323e6f0b2e271b9"
+          }
+        },
+        {
+          "client_id": "8563560529-itkpufrpj07g4645cmq8vn150crdt2ak.apps.googleusercontent.com",
+          "क्लाइंट_टाइप": 3
+        }
+      ],
+      "एपीआई_की": [
+        {
+          "current_key": "AIzaSyC4F7MOtNbghqRr0u5-6zwgodaiWoOfOcg"
+        }
+      ],
+      "सेवाएं": {
+        "ऐपइनवाइट_सर्विस": {
+          "अन्य_प्लेटफ़ॉर्म_ओऑथ_क्लाइंट": [
+            {
+              "client_id": "8563560529-itkpufrpj07g4645cmq8vn150crdt2ak.apps.googleusercontent.com",
+              "क्लाइंट_टाइप": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "क्लाइंट_इन्फो": {
+        "mobilesdk_app_id": "1:8563560529:android:5eeadeedb7cbd407726870",
+        "android_client_info": {
+          "पैकेज_नाम": "com.aistudio.lifeos.kqvxmr"
+        }
+      },
+      "ओऑथ_क्लाइंट": [
+        {
+          "client_id": "8563560529-utbs8pu25b8ea748oqahmvvcj8q5khik.apps.googleusercontent.com",
+          "क्लाइंट_टाइप": 1,
+          "एंड्रॉइड_इन्फो": {
+            "पैकेज_नाम": "com.aistudio.lifeos.kqvxmr",
+            "certificate_hash": "de86810c694cafe4ae1b4431f87e0700f477d3c6"
+          }
+        },
+        {
+          "client_id": "8563560529-itkpufrpj07g4645cmq8vn150crdt2ak.apps.googleusercontent.com",
+          "क्लाइंट_टाइप": 3
+        }
+      ],
+      "एपीआई_की": [
+        {
+          "current_key": "AIzaSyC4F7MOtNbghqRr0u5-6zwgodaiWoOfOcg"
+        }
+      ],
+      "सेवाएं": {
+        "ऐपइनवाइट_सर्विस": {
+          "अन्य_प्लेटफ़ॉर्म_ओऑथ_क्लाइंट": [
+            {
+              "client_id": "8563560529-itkpufrpj07g4645cmq8vn150crdt2ak.apps.googleusercontent.com",
+              "क्लाइंट_टाइप": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "क्लाइंट_इन्फो": {
+        "mobilesdk_app_id": "1:8563560529:android:0d233c557e038f6b726870",
+        "android_client_info": {
+          "पैकेज_नाम": "com.aistudio.shreeradha.vkmpyt"
+        }
+      },
+      "ओऑथ_क्लाइंट": [
+        {
+          "client_id": "8563560529-uu5usbt3g63ht0vv0rb03oc8vl6ejqqb.apps.googleusercontent.com",
+          "क्लाइंट_टाइप": 1,
+          "एंड्रॉइड_इन्फो": {
+            "package_name": "com.aistudio.shreeradha.vkmpyt",
+            "certificate_hash": "e85f8c2caa0ff01807c7105e3a500163ac0d6ef3"
+          }
+        },
+        {
+          "client_id": "8563560529-itkpufrpj07g4645cmq8vn150crdt2ak.apps.googleusercontent.com",
+          "क्लाइंट_टाइप": 3
+        }
+      ],
+      "एपीआई_की": [
+        {
+          "current_key": "AIzaSyC4F7MOtNbghqRr0u5-6zwgodaiWoOfOcg"
+        }
+      ],
+      "सेवाएं": {
+        "ऐपइनवाइट_सर्विस": {
+          "अन्य_प्लेटफ़ॉर्म_ओऑथ_क्लाइंट": [
+            {
+              "client_id": "8563560529-itkpufrpj07g4645cmq8vn150crdt2ak.apps.googleusercontent.com",
+              "क्लाइंट_टाइप": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "क्लाइंट_इन्फो": {
+        "mobilesdk_app_id": "1:8563560529:android:f13b7ffa81443186726870",
+        "android_client_info": {
+          "पैकेज_नाम": "com.aistudio.twentyfourhrs.rkvxnm"
+        }
+      },
+      "ओऑथ_क्लाइंट": [
+        {
+          "client_id": "8563560529-js7k470h5if932gp5i1efjhflpjh0g0u.apps.googleusercontent.com",
+          "क्लाइंट_टाइप": 1,
+          "एंड्रॉइड_इन्फो": {
+            "पैकेज_नाम": "com.aistudio.twentyfourhrs.rkvxnm",
+            "certificate_hash": "416ef211fce5687d85a8895e69bd37e5abb0bc8d"
+          }
+        },
+        {
+          "client_id": "8563560529-itkpufrpj07g4645cmq8vn150crdt2ak.apps.googleusercontent.com",
+          "क्लाइंट_टाइप": 3
+        }
+      ],
+      "एपीआई_की": [
+        {
+          "current_key": "AIzaSyC4F7MOtNbghqRr0u5-6zwgodaiWoOfOcg"
+        }
+      ],
+      "सेवाएं": {
+        "ऐपइनवाइट_सर्विस": {
+          "अन्य_प्लेटफ़ॉर्म_ओऑथ_क्लाइंट": [
+            {
+              "client_id": "8563560529-itkpufrpj07g4645cmq8vn150crdt2ak.apps.googleusercontent.com",
+              "क्लाइंट_टाइप": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "कॉन्फ़िगरेशन_संस्करण": "1"
+      }
