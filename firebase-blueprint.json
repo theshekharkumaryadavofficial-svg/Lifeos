@@ -1,0 +1,380 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Personal LifeOS profile, daily counters, XP, level, and preferences for an authenticated user.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase UID matching the document ID."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User's display name shown in greetings and settings."
+        },
+        "tagline": {
+          "type": "string",
+          "description": "Personal motivational subtitle."
+        },
+        "dailyGoalText": {
+          "type": "string",
+          "description": "Today's focus goal motto."
+        },
+        "level": {
+          "type": "integer",
+          "description": "Current LifeOS mastery level."
+        },
+        "xp": {
+          "type": "integer",
+          "description": "Cumulative experience points earned from tasks, study, workouts, and Naam Jap."
+        },
+        "streakDays": {
+          "type": "integer",
+          "description": "Current consecutive active days."
+        },
+        "totalStudyMinutes": {
+          "type": "integer",
+          "description": "Cumulative focused study minutes logged."
+        },
+        "totalNaamJapCount": {
+          "type": "integer",
+          "description": "Lifetime Naam Jap bead count."
+        },
+        "todayNaamJapCount": {
+          "type": "integer",
+          "description": "Today's Naam Jap bead count."
+        },
+        "todayMalas": {
+          "type": "integer",
+          "description": "Today's completed 108-bead malas."
+        },
+        "activeMantra": {
+          "type": "string",
+          "description": "Currently selected mantra for Naam Jap."
+        },
+        "todayWaterGlasses": {
+          "type": "integer",
+          "description": "Water glasses logged today."
+        },
+        "todaySleepHours": {
+          "type": "number",
+          "description": "Sleep hours logged for today."
+        },
+        "motivationMode": {
+          "type": "boolean",
+          "description": "Whether daily motivational tips and badges are enabled."
+        },
+        "lastActiveDate": {
+          "type": "string",
+          "description": "ISO local date string (YYYY-MM-DD) of last activity."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp() on create."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp() on update."
+        }
+      },
+      "required": [
+        "userId",
+        "displayName",
+        "tagline",
+        "dailyGoalText",
+        "level",
+        "xp",
+        "streakDays",
+        "totalStudyMinutes",
+        "totalNaamJapCount",
+        "todayNaamJapCount",
+        "todayMalas",
+        "activeMantra",
+        "todayWaterGlasses",
+        "todaySleepHours",
+        "motivationMode",
+        "lastActiveDate",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "LifeTask": {
+      "title": "LifeTask",
+      "description": "Actionable daily task across Study, Fitness, Discipline, or Work.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase UID."
+        },
+        "title": {
+          "type": "string",
+          "description": "Task title."
+        },
+        "category": {
+          "type": "string",
+          "enum": ["STUDY", "FITNESS", "DISCIPLINE", "WORK"],
+          "description": "Task domain category."
+        },
+        "completed": {
+          "type": "boolean",
+          "description": "Completion state."
+        },
+        "dueDate": {
+          "type": "string",
+          "description": "Short due label such as Today or Tomorrow."
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["HIGH", "MEDIUM", "LOW"],
+          "description": "Task priority level."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "title",
+        "category",
+        "completed",
+        "dueDate",
+        "priority",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "StudySubject": {
+      "title": "StudySubject",
+      "description": "Tracked academic subject with progress percentage and logged study time.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase UID."
+        },
+        "name": {
+          "type": "string",
+          "description": "Subject name."
+        },
+        "progressPercent": {
+          "type": "integer",
+          "description": "Syllabus mastery percentage (0-100)."
+        },
+        "studyMinutes": {
+          "type": "integer",
+          "description": "Total minutes studied for this subject."
+        },
+        "accentKey": {
+          "type": "string",
+          "enum": ["CRIMSON", "GOLD", "CYAN", "PURPLE", "GREEN"],
+          "description": "Visual progress bar accent color key."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "name",
+        "progressPercent",
+        "studyMinutes",
+        "accentKey",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "StudyNote": {
+      "title": "StudyNote",
+      "description": "Personal study note linked to a subject.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase UID."
+        },
+        "title": {
+          "type": "string",
+          "description": "Note heading."
+        },
+        "subjectName": {
+          "type": "string",
+          "description": "Associated subject label."
+        },
+        "content": {
+          "type": "string",
+          "description": "Note body text."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "title",
+        "subjectName",
+        "content",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "WorkoutLog": {
+      "title": "WorkoutLog",
+      "description": "Fitness activity log entry for running, walking, strength workouts, or yoga.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase UID."
+        },
+        "title": {
+          "type": "string",
+          "description": "Workout title."
+        },
+        "activityType": {
+          "type": "string",
+          "enum": ["RUNNING", "WALKING", "WORKOUT", "YOGA", "CYCLING"],
+          "description": "Activity classification."
+        },
+        "durationMinutes": {
+          "type": "integer",
+          "description": "Duration in minutes."
+        },
+        "distanceKm": {
+          "type": "number",
+          "description": "Optional distance in kilometers."
+        },
+        "caloriesBurned": {
+          "type": "integer",
+          "description": "Estimated calories burned."
+        },
+        "dateLabel": {
+          "type": "string",
+          "description": "Readable date string."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "title",
+        "activityType",
+        "durationMinutes",
+        "distanceKm",
+        "caloriesBurned",
+        "dateLabel",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SadhanaLog": {
+      "title": "SadhanaLog",
+      "description": "Spiritual discipline session recording Naam Jap mala counts and meditation.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase UID."
+        },
+        "mantra": {
+          "type": "string",
+          "description": "Chanted mantra name."
+        },
+        "count": {
+          "type": "integer",
+          "description": "Beads chanted in session."
+        },
+        "malas": {
+          "type": "integer",
+          "description": "Full 108-bead malas completed."
+        },
+        "meditationMinutes": {
+          "type": "integer",
+          "description": "Meditation minutes completed."
+        },
+        "dateLabel": {
+          "type": "string",
+          "description": "Readable session date."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "mantra",
+        "count",
+        "malas",
+        "meditationMinutes",
+        "dateLabel",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Authenticated user's LifeOS profile and daily summary metrics."
+    },
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/LifeTask" },
+      "description": "User-scoped daily tasks and habits."
+    },
+    "/users/{userId}/subjects/{subjectId}": {
+      "schema": { "$ref": "#/entities/StudySubject" },
+      "description": "User-scoped study subjects and progress percentages."
+    },
+    "/users/{userId}/notes/{noteId}": {
+      "schema": { "$ref": "#/entities/StudyNote" },
+      "description": "User-scoped study notes."
+    },
+    "/users/{userId}/workouts/{workoutId}": {
+      "schema": { "$ref": "#/entities/WorkoutLog" },
+      "description": "User-scoped fitness and running logs."
+    },
+    "/users/{userId}/sadhanaLogs/{logId}": {
+      "schema": { "$ref": "#/entities/SadhanaLog" },
+      "description": "User-scoped Naam Jap and meditation session logs."
+    }
+  }
+}
