@@ -67,6 +67,7 @@ import com.example.ui.theme.CrimsonPrimary
 import com.example.ui.theme.ObsidianBg
 import com.example.ui.theme.TextOnDark
 import com.example.ui.theme.TextOnDarkMuted
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 
 @Composable
@@ -83,6 +84,7 @@ fun SplashAndAuthScreen(
     var splashFinished by remember { mutableStateOf(false) }
     var signingIn by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
+    var autoSignInJob by remember { mutableStateOf<Job?>(null) }
 
     val progress by animateFloatAsState(
         targetValue = if (loaderStarted) 1f else 0.08f,
@@ -93,7 +95,7 @@ fun SplashAndAuthScreen(
     LaunchedEffect(Unit) {
         loaderStarted = true
         if (!isAuthenticated) {
-            attemptAutoSignIn(
+            autoSignInJob = attemptAutoSignIn(
                 context = context,
                 credentialManager = credentialManager,
                 onAuthSuccess = onAuthSuccess,
@@ -303,15 +305,24 @@ fun SplashAndAuthScreen(
                         )
                         if (authError != null) {
                             Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = authError!!,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = CrimsonGlow,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(CrimsonDeep.copy(alpha = 0.28f))
+                                    .border(1.dp, CrimsonGlow.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                Text(
+                                    text = authError!!,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        color = TextOnDark,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         CrimsonGlowButton(
@@ -320,6 +331,9 @@ fun SplashAndAuthScreen(
                             loading = signingIn,
                             testTagName = "google_sign_in_button",
                             onClick = {
+                                if (signingIn) return@CrimsonGlowButton
+                                autoSignInJob?.cancel()
+                                autoSignInJob = null
                                 signingIn = true
                                 authError = null
                                 onGoogleSignInClicked(
@@ -334,8 +348,13 @@ fun SplashAndAuthScreen(
                                         authError = msg
                                     },
                                     scope = scope,
-                                    onAuthCancelled = {
+                                    onAuthCancelled = { reason ->
                                         signingIn = false
+                                        if (!reason.isNullOrBlank() &&
+                                            !reason.contains("cancelled by the user", ignoreCase = true)
+                                        ) {
+                                            authError = "Sign-in was dismissed ($reason). Please tap Sign in with Google again."
+                                        }
                                     }
                                 )
                             }

@@ -571,6 +571,102 @@ class LifeRepository(
         }
     }
 
+    // --- FIREBASE APP UPDATE CONFIG ---
+
+    private fun appUpdateDoc() = db.collection("app_config").document("update")
+
+    fun observeAppUpdateConfig(userId: String): Flow<AppUpdateConfig?> = flow {
+        val uid = requireUserId(userId)
+        val path = "app_config/update"
+        emitAll(
+            appUpdateDoc()
+                .snapshots()
+                .map { snapshot ->
+                    if (snapshot.exists()) {
+                        snapshot.toObject(
+                            AppUpdateConfig::class.java,
+                            DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                        )
+                    } else {
+                        null
+                    }
+                }
+                .catch { error ->
+                    handleFlowError(error, OperationType.GET, path, uid)
+                    emit(null)
+                }
+        )
+    }
+
+    suspend fun fetchAppUpdateConfig(userId: String): Result<AppUpdateConfig?> {
+        val path = "app_config/update"
+        return try {
+            requireUserId(userId)
+            val snap = appUpdateDoc().get().await()
+            val config = if (snap.exists()) {
+                snap.toObject(
+                    AppUpdateConfig::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                )
+            } else {
+                null
+            }
+            Result.success(config)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.GET, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun publishAppUpdateConfig(
+        userId: String,
+        latestVersionCode: Long,
+        latestVersionName: String,
+        releaseNotes: String,
+        downloadUrl: String,
+        forceUpdate: Boolean
+    ): Result<Unit> {
+        val cleanVersionName = latestVersionName.trim().take(30)
+        val cleanNotes = releaseNotes.trim().take(1000)
+        val cleanUrl = downloadUrl.trim().take(500)
+        if (latestVersionCode !in 1L..100_000L) {
+            return Result.failure(IllegalArgumentException("Version code must be between 1 and 100000."))
+        }
+        if (cleanVersionName.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Version name cannot be empty."))
+        }
+        if (cleanUrl.isNotEmpty() && !cleanUrl.startsWith("https://")) {
+            return Result.failure(IllegalArgumentException("Download URL must start with https://"))
+        }
+        val path = "app_config/update"
+        return try {
+            requireUserId(userId)
+            val docRef = appUpdateDoc()
+            val existingSnap = docRef.get().await()
+            val payload = mapOf(
+                "latestVersionCode" to latestVersionCode,
+                "latestVersionName" to cleanVersionName,
+                "releaseNotes" to cleanNotes,
+                "downloadUrl" to cleanUrl,
+                "forceUpdate" to forceUpdate,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            if (existingSnap.exists()) {
+                docRef.update(payload).await()
+            } else {
+                docRef.set(payload).await()
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
     private fun handleFlowError(
         error: Throwable,
         operationType: OperationType,

@@ -36,9 +36,13 @@ jobs:
           yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses || true
 
       - name: Prepare Debug Keystore
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
           if [ -f debug.keystore.base64 ]; then
             base64 -d debug.keystore.base64 > debug.keystore
+          elif [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > debug.keystore
           elif [ ! -f debug.keystore ]; then
             keytool -genkeypair -v -keystore debug.keystore \
               -storepass android -alias androiddebugkey -keypass android \
@@ -52,6 +56,7 @@ jobs:
         run: |
           if [ -f app/google-services.json ]; then
             echo "Using repository app/google-services.json"
+            echo "### Firebase Config: Live (from repo app/google-services.json)" >> "$GITHUB_STEP_SUMMARY"
           elif [ -n "$GOOGLE_SERVICES_JSON" ]; then
             if echo "$GOOGLE_SERVICES_JSON" | grep -q '"project_info"'; then
               printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
@@ -59,8 +64,11 @@ jobs:
               echo "$GOOGLE_SERVICES_JSON" | base64 -d > app/google-services.json
             fi
             echo "Restored app/google-services.json from GitHub Secret GOOGLE_SERVICES_JSON"
+            echo "### Firebase Config: Live (from GOOGLE_SERVICES_JSON secret)" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "::warning::app/google-services.json not found in repo or GOOGLE_SERVICES_JSON secret. Writing CI fallback so APK compiles; add GOOGLE_SERVICES_JSON secret in GitHub Settings for live Firebase Sign-In & sync."
+            echo "::warning::app/google-services.json not found in repo or GOOGLE_SERVICES_JSON secret. Google Sign-In will NOT work on this APK until GOOGLE_SERVICES_JSON is added in GitHub Settings -> Secrets -> Actions."
+            echo "### WARNING: Built with Placeholder Firebase Config" >> "$GITHUB_STEP_SUMMARY"
+            echo "Google Sign-In requires adding \`GOOGLE_SERVICES_JSON\` (and \`DEBUG_KEYSTORE_BASE64\`) in **Settings -> Secrets and variables -> Actions** and re-running this workflow." >> "$GITHUB_STEP_SUMMARY"
             cat <<'EOF' > app/google-services.json
           {
             "project_info": {

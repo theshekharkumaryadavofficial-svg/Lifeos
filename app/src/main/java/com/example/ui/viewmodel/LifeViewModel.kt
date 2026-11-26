@@ -3,8 +3,10 @@ package com.example.ui.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
 import com.example.data.AiChatMessage
 import com.example.data.AiTutorRepository
+import com.example.data.AppUpdateConfig
 import com.example.data.LifeRepository
 import com.example.data.LifeTask
 import com.example.data.QuizQuestion
@@ -96,6 +98,34 @@ class LifeViewModel(
 
     val sadhanaLogsState: StateFlow<UiState<List<SadhanaLog>>> =
         repository.observeSadhanaLogs(currentUserId).toSafeUiState("sadhana logs")
+
+    val appUpdateConfig: StateFlow<AppUpdateConfig?> =
+        repository.observeAppUpdateConfig(currentUserId)
+            .catch { error ->
+                val firestoreError = generateSequence(error) { it.cause }
+                    .filterIsInstance<FirebaseFirestoreException>()
+                    .firstOrNull()
+                if (firestoreError == null && error is CancellationException) throw error
+                Log.w(TAG, "Error observing app update config", firestoreError ?: error)
+                emit(null)
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
+                initialValue = null
+            )
+
+    private val _checkingForUpdate = MutableStateFlow(false)
+    val checkingForUpdate: StateFlow<Boolean> = _checkingForUpdate.asStateFlow()
+
+    private val _publishingUpdate = MutableStateFlow(false)
+    val publishingUpdate: StateFlow<Boolean> = _publishingUpdate.asStateFlow()
+
+    private val _updatePromptDismissed = MutableStateFlow(false)
+    val updatePromptDismissed: StateFlow<Boolean> = _updatePromptDismissed.asStateFlow()
+
+    private val _lastUpdateStatus = MutableStateFlow<String?>(null)
+    val lastUpdateStatus: StateFlow<String?> = _lastUpdateStatus.asStateFlow()
 
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
@@ -575,6 +605,83 @@ class LifeViewModel(
                 _progressInsight.value = UiState.Error(
                     e.localizedMessage ?: "Could not analyze progress right now."
                 )
+            }
+        }
+    }
+
+    // --- FIREBASE IN-APP UPDATE ---
+
+    fun hasNewerUpdate(config: AppUpdateConfig?): Boolean =
+        config != null && config.latestVersionCode > BuildConfig.VERSION_CODE
+
+    fun dismissUpdatePrompt() {
+        _updatePromptDismissed.value = true
+    }
+
+    fun checkForAppUpdate() {
+        if (_checkingForUpdate.value) return
+        _checkingForUpdate.value = true
+        viewModelScope.launch {
+            try {
+                repository.fetchAppUpdateConfig(currentUserId)
+                    .onSuccess { config ->
+                        when {
+                            config == null -> {
+                                val msg = "You are on LifeOS v${BuildConfig.VERSION_NAME} (Latest)."
+                                _lastUpdateStatus.value = msg
+                                _snackbarMessage.value = msg
+                            }
+                            config.latestVersionCode > BuildConfig.VERSION_CODE -> {
+                                _updatePromptDismissed.value = false
+                                val msg = "New update v${config.latestVersionName} available on Firebase!"
+                                _lastUpdateStatus.value = msg
+                                _snackbarMessage.value = msg
+                            }
+                            else -> {
+                                val msg = "LifeOS v${BuildConfig.VERSION_NAME} is up to date!"
+                                _lastUpdateStatus.value = msg
+                                _snackbarMessage.value = msg
+                            }
+                        }
+                    }
+                    .onFailure { err ->
+                        val msg = err.localizedMessage ?: "Could not check Firebase updates right now."
+                        _lastUpdateStatus.value = msg
+                        _snackbarMessage.value = msg
+                    }
+            } finally {
+                _checkingForUpdate.value = false
+            }
+        }
+    }
+
+    fun publishAppUpdate(
+        versionCode: Long,
+        versionName: String,
+        releaseNotes: String,
+        downloadUrl: String,
+        forceUpdate: Boolean,
+        onSuccess: () -> Unit = {}
+    ) {
+        if (_publishingUpdate.value) return
+        _publishingUpdate.value = true
+        viewModelScope.launch {
+            try {
+                repository.publishAppUpdateConfig(
+                    userId = currentUserId,
+                    latestVersionCode = versionCode,
+                    latestVersionName = versionName,
+                    releaseNotes = releaseNotes,
+                    downloadUrl = downloadUrl,
+                    forceUpdate = forceUpdate
+                ).onSuccess {
+                    _snackbarMessage.value = "Published LifeOS v${versionName.trim()} update to Firebase!"
+                    onSuccess()
+                }.onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Failed to publish update config."
+                }
+            } finally {
+                _publishingUpdate.value = false
             }
         }
     }

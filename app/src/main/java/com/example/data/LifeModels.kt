@@ -104,6 +104,18 @@ data class SadhanaLog(
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
+@Keep
+@IgnoreExtraProperties
+data class AppUpdateConfig(
+    @DocumentId val id: String = "",
+    val latestVersionCode: Long = 1L,
+    val latestVersionName: String = "1.0",
+    val releaseNotes: String = "",
+    val downloadUrl: String = "",
+    val forceUpdate: Boolean = false,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
 data class AiChatMessage(
     val id: String,
     val fromUser: Boolean,
