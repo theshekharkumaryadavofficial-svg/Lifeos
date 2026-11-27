@@ -36,6 +36,12 @@ data class UserProfile(
     val moneyMonthlyBudget: Double = 10000.0,
     val moneySmsTrackingEnabled: Boolean = true,
     val moneyOnboardingSeen: Boolean = false,
+    val trustedSmsSendersCsv: String = "",
+    val savingsGoalName: String = "Save ₹10,000",
+    val savingsGoalTarget: Double = 10000.0,
+    val savingsGoalSaved: Double = 0.0,
+    val savingsGoalTargetDate: String = "Dec 31, 2026",
+    val smsAuditMigrated: Boolean = false,
     val totalNaamJapCount: Long = 0L,
     val todayNaamJapCount: Long = 0L,
     val todayMalas: Long = 0L,
@@ -58,16 +64,27 @@ data class MoneyTransaction(
     val title: String = "",
     val amount: Double = 0.0,
     val type: String = "EXPENSE", // "INCOME" or "EXPENSE"
-    val category: String = "Others", // "Food", "Shopping", "Bills", "Travel", "Salary", "Others"
-    val paymentMode: String = "UPI", // "UPI", "Bank", "Wallet", "Card", "Cash"
+    val category: String = "Others",
+    val paymentMode: String = "UPI",
     val source: String = "MANUAL", // "SMS" or "MANUAL"
+    val status: String = "CONFIRMED", // "CONFIRMED", "PENDING_REVIEW", "QUARANTINED"
+    val trustClassification: String = "TRUSTED_PATTERN", // "TRUSTED_PATTERN", "REVIEW_REQUIRED", "HIGH_RISK"
+    val riskScore: Int = 0,
+    val flagReasonsCsv: String = "", // "||"-separated human-readable explanations
+    val matchedTemplateId: String = "",
+    val accountSuffix: String = "",
+    val referenceId: String = "",
+    val userVerified: Boolean = false,
     val smsSender: String = "",
     val smsBody: String = "",
     val smsSignature: String = "",
     val detectedBankBalance: Double? = null,
     val timestampMs: Long = System.currentTimeMillis(),
     val createdAt: Long = System.currentTimeMillis()
-)
+) {
+    fun flagReasonsList(): List<String> =
+        flagReasonsCsv.split("||").map { it.trim() }.filter { it.isNotEmpty() }
+}
 
 @Entity(tableName = "study_time_slots")
 data class StudyTimeSlot(

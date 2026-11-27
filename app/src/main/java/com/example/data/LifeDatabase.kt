@@ -8,6 +8,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.Update
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
@@ -37,8 +38,17 @@ interface LifeDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMoneyTransactionsIgnore(txList: List<MoneyTransaction>): List<Long>
 
+    @Update
+    suspend fun updateMoneyTransaction(tx: MoneyTransaction)
+
     @Query("DELETE FROM money_transactions WHERE id = :txId")
     suspend fun deleteMoneyTransaction(txId: String)
+
+    @Query("DELETE FROM money_transactions WHERE source = 'SMS'")
+    suspend fun deleteAllImportedSmsTransactions()
+
+    @Query("DELETE FROM money_transactions WHERE status = 'QUARANTINED'")
+    suspend fun deleteAllQuarantinedTransactions()
 
     @Query("DELETE FROM money_transactions")
     suspend fun clearAllMoneyTransactions()
@@ -128,7 +138,7 @@ interface LifeDao {
         WorkoutLog::class,
         SadhanaLog::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class LifeDatabase : RoomDatabase() {
@@ -218,6 +228,54 @@ abstract class LifeDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN trustedSmsSendersCsv TEXT NOT NULL DEFAULT ''"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN savingsGoalName TEXT NOT NULL DEFAULT 'Save ₹10,000'"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN savingsGoalTarget REAL NOT NULL DEFAULT 10000.0"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN savingsGoalSaved REAL NOT NULL DEFAULT 0.0"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN savingsGoalTargetDate TEXT NOT NULL DEFAULT 'Dec 31, 2026'"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN smsAuditMigrated INTEGER NOT NULL DEFAULT 0"
+                )
+
+                db.execSQL(
+                    "ALTER TABLE money_transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'CONFIRMED'"
+                )
+                db.execSQL(
+                    "ALTER TABLE money_transactions ADD COLUMN trustClassification TEXT NOT NULL DEFAULT 'TRUSTED_PATTERN'"
+                )
+                db.execSQL(
+                    "ALTER TABLE money_transactions ADD COLUMN riskScore INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE money_transactions ADD COLUMN flagReasonsCsv TEXT NOT NULL DEFAULT ''"
+                )
+                db.execSQL(
+                    "ALTER TABLE money_transactions ADD COLUMN matchedTemplateId TEXT NOT NULL DEFAULT ''"
+                )
+                db.execSQL(
+                    "ALTER TABLE money_transactions ADD COLUMN accountSuffix TEXT NOT NULL DEFAULT ''"
+                )
+                db.execSQL(
+                    "ALTER TABLE money_transactions ADD COLUMN referenceId TEXT NOT NULL DEFAULT ''"
+                )
+                db.execSQL(
+                    "ALTER TABLE money_transactions ADD COLUMN userVerified INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
         fun getInstance(context: Context): LifeDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -225,7 +283,7 @@ abstract class LifeDatabase : RoomDatabase() {
                     LifeDatabase::class.java,
                     "lifeos_local.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { INSTANCE = it }

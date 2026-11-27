@@ -36,42 +36,35 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
-import androidx.compose.material.icons.rounded.AccountBalance
-import androidx.compose.material.icons.rounded.AccountBalanceWallet
+import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
-import androidx.compose.material.icons.rounded.Assessment
-import androidx.compose.material.icons.rounded.BarChart
-import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.DirectionsCar
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.EmojiEvents
+import androidx.compose.material.icons.rounded.GppBad
+import androidx.compose.material.icons.rounded.GppMaybe
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Notifications
-import androidx.compose.material.icons.rounded.Payments
-import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Restaurant
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.ShoppingCart
-import androidx.compose.material.icons.rounded.Sms
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.TrackChanges
+import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.WorkspacePremium
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -91,12 +84,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
-import androidx.core.view.WindowCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -105,14 +98,22 @@ import com.example.data.MoneyTransaction
 import com.example.data.UiState
 import com.example.data.UserProfile
 import com.example.money.SmsInboxScanner
+import com.example.money.TransactionStatus
 import com.example.money.formatInr
 import com.example.money.formatTransactionDateLabel
 import com.example.ui.viewmodel.LifeViewModel
 import com.example.ui.viewmodel.MoneySummaryState
 import java.util.Calendar
+import kotlin.math.abs
 
-private enum class MoneyTab {
-    HOME, ANALYTICS, REPORTS, MORE, MESSAGE_TRACKING
+private enum class MoneyRoute {
+    HOME,
+    HISTORY,
+    GOALS,
+    SETTINGS,
+    ADD_TRANSACTION,
+    ANALYTICS,
+    TRUST_CENTER
 }
 
 @Composable
@@ -147,8 +148,8 @@ fun MoneyTrackerScreen(
     val transactions = (transactionsState as? UiState.Success)?.data.orEmpty()
 
     var hasSmsPermission by remember { mutableStateOf(SmsInboxScanner.hasSmsPermissions(context)) }
-    var activeTab by rememberSaveable { mutableStateOf(MoneyTab.HOME) }
-    var showAddTxDialog by remember { mutableStateOf(false) }
+    var activeRoute by rememberSaveable { mutableStateOf(MoneyRoute.HOME) }
+    var trustCenterInitialTab by rememberSaveable { mutableStateOf(TrustCenterTab.OVERVIEW) }
     var inspectingTx by remember { mutableStateOf<MoneyTransaction?>(null) }
     var localWelcomeDismissed by rememberSaveable { mutableStateOf(false) }
 
@@ -193,15 +194,22 @@ fun MoneyTrackerScreen(
         )
     }
 
+    fun openTrustCenter(tab: TrustCenterTab = TrustCenterTab.OVERVIEW) {
+        trustCenterInitialTab = tab
+        activeRoute = MoneyRoute.TRUST_CENTER
+    }
+
     BackHandler {
-        when (activeTab) {
-            MoneyTab.MESSAGE_TRACKING -> activeTab = MoneyTab.HOME
-            MoneyTab.HOME -> onExitToLifeOs()
-            else -> activeTab = MoneyTab.HOME
+        when (activeRoute) {
+            MoneyRoute.ADD_TRANSACTION,
+            MoneyRoute.ANALYTICS,
+            MoneyRoute.TRUST_CENTER -> activeRoute = MoneyRoute.HOME
+            MoneyRoute.HOME -> onExitToLifeOs()
+            else -> activeRoute = MoneyRoute.HOME
         }
     }
 
-    // Panel 1: Welcome Intro (shown on first visit until "Get Started →" is tapped)
+    // Panel 1: Welcome Splash (Glass Jar of Gold ₹ Coins + Sprout Leaf)
     val showWelcome = !profile.moneyOnboardingSeen && !localWelcomeDismissed
     if (showWelcome) {
         MoneyWelcomeSplash(
@@ -214,6 +222,14 @@ fun MoneyTrackerScreen(
         return
     }
 
+    val showBottomBar = activeRoute in setOf(
+        MoneyRoute.HOME,
+        MoneyRoute.HISTORY,
+        MoneyRoute.GOALS,
+        MoneyRoute.SETTINGS,
+        MoneyRoute.ANALYTICS
+    )
+
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
@@ -222,37 +238,31 @@ fun MoneyTrackerScreen(
         containerColor = MoneyBg,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            if (activeTab != MoneyTab.MESSAGE_TRACKING) {
+            if (showBottomBar) {
                 MoneyBottomNavBar(
-                    currentTab = activeTab,
-                    onSelectTab = { activeTab = it },
-                    onAddClick = { showAddTxDialog = true }
+                    currentRoute = activeRoute,
+                    onSelectRoute = { activeRoute = it },
+                    onAddClick = { activeRoute = MoneyRoute.ADD_TRANSACTION }
                 )
             }
         }
     ) { innerPadding ->
         AnimatedContent(
-            targetState = activeTab,
-            transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) },
-            label = "money_tab_anim"
-        ) { tab ->
-            when (tab) {
-                MoneyTab.HOME -> MoneyHomeDashboard(
+            targetState = activeRoute,
+            transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(150)) },
+            label = "money_route_anim"
+        ) { route ->
+            when (route) {
+                MoneyRoute.HOME -> MoneyHomeDashboard(
                     profile = profile,
                     summary = summary,
                     transactions = transactions,
                     hasSmsPermission = hasSmsPermission,
                     smsSyncing = smsSyncing,
                     onBackToLifeOs = onExitToLifeOs,
-                    onOpenMessageTracking = { activeTab = MoneyTab.MESSAGE_TRACKING },
-                    onViewAllTransactions = { activeTab = MoneyTab.REPORTS },
-                    onToggleMessageTracking = { nextOn ->
-                        if (nextOn && !hasSmsPermission) {
-                            requestSmsPermissions()
-                        } else {
-                            viewModel.setMoneySmsTrackingEnabled(nextOn)
-                        }
-                    },
+                    onOpenTrustCenter = { tab -> openTrustCenter(tab) },
+                    onOpenAnalytics = { activeRoute = MoneyRoute.ANALYTICS },
+                    onOpenGoals = { activeRoute = MoneyRoute.GOALS },
                     onSyncSmsNow = {
                         if (hasSmsPermission) viewModel.syncBankSmsInbox(silentIfZero = false)
                         else requestSmsPermissions()
@@ -260,68 +270,98 @@ fun MoneyTrackerScreen(
                     bottomPadding = innerPadding
                 )
 
-                MoneyTab.ANALYTICS -> MoneyAnalyticsScreen(
+                MoneyRoute.HISTORY -> MoneyTransactionHistoryScreen(
                     transactions = transactions,
-                    bottomPadding = innerPadding
-                )
-
-                MoneyTab.REPORTS -> MoneyTransactionsTab(
-                    transactions = transactions,
-                    hasSmsPermission = hasSmsPermission,
+                    summary = summary,
                     smsSyncing = smsSyncing,
+                    onBack = { activeRoute = MoneyRoute.HOME },
                     onSyncSms = {
                         if (hasSmsPermission) viewModel.syncBankSmsInbox(silentIfZero = false)
                         else requestSmsPermissions()
                     },
-                    onAddManual = { showAddTxDialog = true },
+                    onOpenTrustCenter = { tab -> openTrustCenter(tab) },
                     onSelectTransaction = { inspectingTx = it },
                     bottomPadding = innerPadding
                 )
 
-                MoneyTab.MORE -> MoneyMoreScreen(
+                MoneyRoute.ADD_TRANSACTION -> MoneyAddTransactionScreen(
+                    onBack = { activeRoute = MoneyRoute.HOME },
+                    onSave = { title, amount, type, category, mode, ts ->
+                        viewModel.addManualMoneyTransaction(title, amount, type, category, mode, ts)
+                    }
+                )
+
+                MoneyRoute.ANALYTICS -> MoneyAnalyticsScreen(
+                    transactions = transactions,
+                    onBack = { activeRoute = MoneyRoute.HOME },
+                    bottomPadding = innerPadding
+                )
+
+                MoneyRoute.GOALS -> MoneyGoalsAndSettingsScreen(
+                    showSettingsFocus = false,
                     profile = profile,
                     summary = summary,
                     transactions = transactions,
-                    onOpenMessageTracking = { activeTab = MoneyTab.MESSAGE_TRACKING },
-                    onSyncSmsNow = {
-                        if (hasSmsPermission) viewModel.syncBankSmsInbox(silentIfZero = false)
-                        else requestSmsPermissions()
-                    },
+                    onOpenAnalytics = { activeRoute = MoneyRoute.ANALYTICS },
+                    onOpenTrustCenter = { tab -> openTrustCenter(tab) },
                     onUpdateBudget = { viewModel.updateMoneyMonthlyBudget(it) },
                     onUpdateOpeningBalance = { viewModel.updateMoneyOpeningBalance(it) },
+                    onUpdateSavingsGoal = { n, t, s, d -> viewModel.updateSavingsGoal(n, t, s, d) },
+                    onDeleteImportedSmsData = { viewModel.deleteAllImportedSmsTransactions() },
                     onClearAllTransactions = { viewModel.clearAllMoneyTransactions() },
                     onExitToLifeOs = onExitToLifeOs,
                     bottomPadding = innerPadding
                 )
 
-                MoneyTab.MESSAGE_TRACKING -> MoneyMessageTrackingScreen(
-                    trackingEnabled = profile.moneySmsTrackingEnabled,
+                MoneyRoute.SETTINGS -> MoneyGoalsAndSettingsScreen(
+                    showSettingsFocus = true,
+                    profile = profile,
+                    summary = summary,
+                    transactions = transactions,
+                    onOpenAnalytics = { activeRoute = MoneyRoute.ANALYTICS },
+                    onOpenTrustCenter = { tab -> openTrustCenter(tab) },
+                    onUpdateBudget = { viewModel.updateMoneyMonthlyBudget(it) },
+                    onUpdateOpeningBalance = { viewModel.updateMoneyOpeningBalance(it) },
+                    onUpdateSavingsGoal = { n, t, s, d -> viewModel.updateSavingsGoal(n, t, s, d) },
+                    onDeleteImportedSmsData = { viewModel.deleteAllImportedSmsTransactions() },
+                    onClearAllTransactions = { viewModel.clearAllMoneyTransactions() },
+                    onExitToLifeOs = onExitToLifeOs,
+                    bottomPadding = innerPadding
+                )
+
+                MoneyRoute.TRUST_CENTER -> MoneyTrustCenterScreen(
+                    profile = profile,
+                    summary = summary,
+                    transactions = transactions,
                     hasSmsPermission = hasSmsPermission,
                     smsSyncing = smsSyncing,
-                    smsTrackedCount = summary.smsTrackedCount,
-                    onBack = { activeTab = MoneyTab.HOME },
+                    initialTab = trustCenterInitialTab,
+                    onBack = { activeRoute = MoneyRoute.HOME },
+                    onToggleSmsTracking = { viewModel.setMoneySmsTrackingEnabled(it) },
                     onRequestSmsPermission = { requestSmsPermissions() },
                     onSyncSmsNow = { viewModel.syncBankSmsInbox(silentIfZero = false) },
-                    onAddParsedSms = { parsed -> viewModel.addParsedSmsTransaction(parsed) }
+                    onReAuditSmsNow = { viewModel.reAuditImportedSmsNow() },
+                    onAddParsedSms = { viewModel.addParsedSmsTransaction(it) },
+                    onApprovePending = { tx, trust -> viewModel.approvePendingTransaction(tx, trust) },
+                    onQuarantineTx = { viewModel.quarantineTransaction(it) },
+                    onDeleteTx = { viewModel.deleteMoneyTransaction(it) },
+                    onClearQuarantined = { viewModel.deleteAllQuarantinedTransactions() },
+                    onAddTrustedSender = { viewModel.addCustomTrustedSender(it) },
+                    onRemoveTrustedSender = { viewModel.removeCustomTrustedSender(it) },
+                    onInspectTransaction = { inspectingTx = it }
                 )
             }
         }
     }
 
-    if (showAddTxDialog) {
-        AddMoneyTransactionDialog(
-            onDismiss = { showAddTxDialog = false },
-            onSave = { title, amount, type, category, mode ->
-                viewModel.addManualMoneyTransaction(title, amount, type, category, mode)
-            }
-        )
-    }
-
     inspectingTx?.let { tx ->
-        TransactionDetailDialog(
+        TransactionVerificationDetailDialog(
             tx = tx,
             onDismiss = { inspectingTx = null },
-            onDelete = { viewModel.deleteMoneyTransaction(tx.id) }
+            onUpdateTx = { viewModel.updateManualTransaction(it) },
+            onApproveTx = { target, trust -> viewModel.approvePendingTransaction(target, trust) },
+            onQuarantineTx = { viewModel.quarantineTransaction(it) },
+            onDeleteTx = { viewModel.deleteMoneyTransaction(it) }
         )
     }
 }
@@ -339,10 +379,10 @@ private fun MoneyWelcomeSplash(
             .background(
                 Brush.verticalGradient(
                     listOf(
-                        Color(0xFFDBFCE9),
+                        Color(0xFF43B5F4),
+                        Color(0xFFD9F3FF),
                         Color(0xFFFFFFFF),
-                        Color(0xFFF3F6FF),
-                        Color(0xFFD1FAE5)
+                        Color(0xFFD5FAE6)
                     )
                 )
             )
@@ -356,7 +396,7 @@ private fun MoneyWelcomeSplash(
                 .align(Alignment.TopStart)
                 .size(48.dp)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.85f))
+                .background(Color.White.copy(alpha = 0.88f))
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
@@ -370,55 +410,49 @@ private fun MoneyWelcomeSplash(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Icon(
-                imageVector = Icons.Rounded.WorkspacePremium,
-                contentDescription = null,
-                tint = Color(0xFFF59E0B),
-                modifier = Modifier.size(56.dp)
+            MoneyWelcomeHeroArtwork(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(255.dp)
             )
-            Spacer(modifier = Modifier.height(6.dp))
+
+            Spacer(modifier = Modifier.height(10.dp))
+
             Text(
                 text = "Money\nTracker",
-                color = MoneyInk,
-                fontSize = 44.sp,
-                lineHeight = 48.sp,
+                color = MoneyGreenDeep,
+                fontSize = 46.sp,
+                lineHeight = 50.sp,
                 fontWeight = FontWeight.Black,
                 textAlign = TextAlign.Center
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Track  •  Analyze  •  Save",
-                color = MoneySecondary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-
-            Spacer(modifier = Modifier.height(22.dp))
-
-            MoneyWelcomeHeroArtwork(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(236.dp)
-            )
-
-            Spacer(modifier = Modifier.height(22.dp))
-
-            Text(
-                text = "Your Personal Finance Buddy",
+                text = "Plan  •  Track  •  Grow",
                 color = MoneyInk,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.ExtraBold,
-                textAlign = TextAlign.Center
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Black
             )
+            Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "Auto-tracks Bank & UPI SMS into Real Balance",
+                text = "Take control of your money\nand build a better future!",
                 color = MoneySecondary,
-                fontSize = 14.sp,
+                fontSize = 16.sp,
+                lineHeight = 23.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
             )
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(modifier = Modifier.width(34.dp).height(2.dp).background(MoneyGold.copy(alpha = 0.65f)))
+                Icon(Icons.Rounded.WorkspacePremium, contentDescription = null, tint = MoneyGold, modifier = Modifier.size(22.dp))
+                Box(modifier = Modifier.width(34.dp).height(2.dp).background(MoneyGold.copy(alpha = 0.65f)))
+            }
 
-            Spacer(modifier = Modifier.height(26.dp))
+            Spacer(modifier = Modifier.height(28.dp))
 
             Button(
                 onClick = onGetStarted,
@@ -434,7 +468,7 @@ private fun MoneyWelcomeSplash(
             ) {
                 Text(
                     text = "Get Started",
-                    fontSize = 19.sp,
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.Black
                 )
                 Spacer(modifier = Modifier.width(10.dp))
@@ -458,9 +492,9 @@ private fun MoneyHomeDashboard(
     hasSmsPermission: Boolean,
     smsSyncing: Boolean,
     onBackToLifeOs: () -> Unit,
-    onOpenMessageTracking: () -> Unit,
-    onViewAllTransactions: () -> Unit,
-    onToggleMessageTracking: (Boolean) -> Unit,
+    onOpenTrustCenter: (TrustCenterTab) -> Unit,
+    onOpenAnalytics: () -> Unit,
+    onOpenGoals: () -> Unit,
     onSyncSmsNow: () -> Unit,
     bottomPadding: PaddingValues
 ) {
@@ -468,24 +502,43 @@ private fun MoneyHomeDashboard(
 
     val firstName = profile.displayName.trim().substringBefore(" ").ifEmpty { "Shekhar" }
     val initial = firstName.firstOrNull()?.uppercaseChar()?.toString() ?: "S"
+    val flaggedAlerts = summary.pendingCount + summary.quarantinedCount
 
-    // Compute 10-bucket current month income & expense bars from real transactions
-    val (incomeBuckets, expenseBuckets) = remember(transactions) {
-        val inc = DoubleArray(10) { 0.0 }
-        val exp = DoubleArray(10) { 0.0 }
+    // Compute current month confirmed category slices for "This Month Overview" donut card
+    val confirmedMonthExpenses = remember(transactions) {
         val nowCal = Calendar.getInstance()
         val curMonth = nowCal.get(Calendar.MONTH)
         val curYear = nowCal.get(Calendar.YEAR)
         val cal = Calendar.getInstance()
-        for (tx in transactions) {
+        transactions.filter { tx ->
+            if (tx.status != TransactionStatus.CONFIRMED.key || tx.type != "EXPENSE") return@filter false
             cal.timeInMillis = tx.timestampMs
-            if (cal.get(Calendar.MONTH) == curMonth && cal.get(Calendar.YEAR) == curYear) {
-                val day = cal.get(Calendar.DAY_OF_MONTH)
-                val bucket = ((day - 1) / 3).coerceIn(0, 9)
-                if (tx.type == "INCOME") inc[bucket] += tx.amount else exp[bucket] += tx.amount
-            }
+            cal.get(Calendar.MONTH) == curMonth && cal.get(Calendar.YEAR) == curYear
         }
-        inc.toList() to exp.toList()
+    }
+    val monthSpent = confirmedMonthExpenses.sumOf { it.amount }
+    val overviewSlices = remember(confirmedMonthExpenses, monthSpent) {
+        val grouped = confirmedMonthExpenses.groupBy { it.category }
+            .mapValues { (_, list) -> list.sumOf { it.amount } }
+        val food = grouped["Food"] ?: 0.0
+        val study = grouped["Study"] ?: 0.0
+        val travel = grouped["Travel"] ?: 0.0
+        val others = (monthSpent - food - study - travel).coerceAtLeast(0.0)
+        listOf(
+            CategorySlice("Food", food, if (monthSpent > 0) ((food / monthSpent) * 100).toInt() else 0, Color(0xFF15803D)),
+            CategorySlice("Study", study, if (monthSpent > 0) ((study / monthSpent) * 100).toInt() else 0, Color(0xFFF59E0B)),
+            CategorySlice("Travel", travel, if (monthSpent > 0) ((travel / monthSpent) * 100).toInt() else 0, Color(0xFF2563EB)),
+            CategorySlice("Others", others, if (monthSpent > 0) ((others / monthSpent) * 100).toInt() else 0, Color(0xFF7C3AED))
+        )
+    }
+
+    val netPctLabel = remember(summary) {
+        if (summary.confirmedIncome > 0.0) {
+            val savedPct = (((summary.confirmedIncome - summary.confirmedExpense) / summary.confirmedIncome) * 100.0).toInt()
+            if (savedPct >= 0) "↑ +$savedPct%" else "↓ $savedPct%"
+        } else {
+            "Verified"
+        }
     }
 
     LazyColumn(
@@ -500,7 +553,7 @@ private fun MoneyHomeDashboard(
         ),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Top Header ("S" Avatar + "Hello, Shekhar 👋" + Bell/SMS Sync + Back to LifeOS)
+        // 1. Header: Back + Avatar + "Hello Shekhar 👋" + "Keep going! 💪" + Bell (SMS Trust Center)
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -515,11 +568,7 @@ private fun MoneyHomeDashboard(
                         .border(1.dp, MoneyBorder, CircleShape)
                         .testTag("money_home_back_button")
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back to LifeOS",
-                        tint = MoneyInk
-                    )
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back to LifeOS", tint = MoneyInk)
                 }
 
                 Spacer(modifier = Modifier.width(10.dp))
@@ -528,12 +577,12 @@ private fun MoneyHomeDashboard(
                     modifier = Modifier
                         .size(46.dp)
                         .clip(CircleShape)
-                        .background(MoneyGreenMain),
+                        .background(Color(0xFFCBD5E1)),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = initial,
-                        color = Color.White,
+                        color = MoneyInk,
                         fontSize = 21.sp,
                         fontWeight = FontWeight.Black
                     )
@@ -543,80 +592,87 @@ private fun MoneyHomeDashboard(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Hello, $firstName 👋",
+                        text = "Hello $firstName 👋",
                         color = MoneyInk,
-                        fontSize = 21.sp,
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.Black,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "Keep going! You're on track!",
+                        text = "Keep going! 💪",
                         color = MoneySecondary,
-                        fontSize = 13.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
 
                 IconButton(
-                    onClick = onOpenMessageTracking,
+                    onClick = {
+                        val targetTab = when {
+                            summary.quarantinedCount > 0 -> TrustCenterTab.QUARANTINE
+                            summary.pendingCount > 0 -> TrustCenterTab.PENDING
+                            else -> TrustCenterTab.OVERVIEW
+                        }
+                        onOpenTrustCenter(targetTab)
+                    },
                     modifier = Modifier
-                        .size(46.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
                         .background(MoneyCardWhite)
                         .border(1.dp, MoneyBorder, CircleShape)
-                        .testTag("money_bell_message_tracking_button")
+                        .testTag("money_bell_trust_center_button")
                 ) {
                     Box {
                         Icon(
                             imageVector = Icons.Rounded.Notifications,
-                            contentDescription = "Message Tracking",
+                            contentDescription = "SMS Trust Center",
                             tint = MoneyInk,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(25.dp)
                         )
                         Box(
                             modifier = Modifier
-                                .size(9.dp)
+                                .size(11.dp)
                                 .align(Alignment.TopEnd)
                                 .clip(CircleShape)
-                                .background(if (hasSmsPermission) MoneyGreenMain else MoneyRed)
+                                .background(if (flaggedAlerts > 0 || !hasSmsPermission) MoneyRed else MoneyGreenMain)
                         )
                     }
                 }
             }
         }
 
-        // 2. Emerald Gradient Total Balance Hero Card (matching Panel 2)
+        // 2. Deep Emerald Total Balance Card (Panel 2 Hero)
         item {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .shadow(10.dp, RoundedCornerShape(24.dp), spotColor = MoneyGreenDeep.copy(alpha = 0.35f))
-                    .clip(RoundedCornerShape(24.dp))
+                    .shadow(10.dp, RoundedCornerShape(26.dp), spotColor = MoneyGreenDeep.copy(alpha = 0.35f))
+                    .clip(RoundedCornerShape(26.dp))
                     .background(
                         Brush.linearGradient(
-                            listOf(MoneyGreenDeep, MoneyGreenMain, Color(0xFF06924E))
+                            listOf(Color(0xFF044E36), MoneyGreenDeep, Color(0xFF0B8550))
                         )
                     )
                     .testTag("money_total_balance_card")
             ) {
-                BalanceWaveOverlay(
+                BalanceRisingBarsOverlay(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .width(190.dp)
-                        .height(110.dp)
+                        .width(116.dp)
+                        .height(114.dp)
+                        .padding(end = 10.dp, bottom = 10.dp)
                 )
 
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 22.dp, vertical = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
                             text = "Total Balance",
@@ -624,39 +680,50 @@ private fun MoneyHomeDashboard(
                             fontSize = 18.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
-                        IconButton(
-                            onClick = { hideBalance = !hideBalance },
+                        Icon(
+                            imageVector = if (hideBalance) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                            contentDescription = if (hideBalance) "Show Balance" else "Hide Balance",
+                            tint = Color.White.copy(alpha = 0.9f),
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(22.dp)
+                                .clickable { hideBalance = !hideBalance }
                                 .testTag("money_toggle_balance_visibility")
-                        ) {
-                            Icon(
-                                imageVector = if (hideBalance) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                contentDescription = if (hideBalance) "Show Balance" else "Hide Balance",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
+                        )
                     }
 
-                    Text(
-                        text = if (hideBalance) "₹ ••••••" else formatInr(summary.realBalance),
-                        color = Color.White,
-                        fontSize = 40.sp,
-                        fontWeight = FontWeight.Black,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-
-                    val weekSign = if (summary.thisWeekNet >= 0.0) "↑ +" else "↓ "
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Text(
-                            text = "$weekSign${formatInr(summary.thisWeekNet)} this week",
-                            color = Color(0xFFCFFCE2),
-                            fontSize = 15.sp,
+                            text = if (hideBalance) "₹ ••••••" else formatInr(summary.calculatedAppBalance),
+                            color = Color.White,
+                            fontSize = 38.sp,
+                            fontWeight = FontWeight.Black,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(Color.White.copy(alpha = 0.18f))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = netPctLabel,
+                                color = Color(0xFF86EFAC),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+
+                    // Subtle Verified SMS Bank Balance pill if present
+                    summary.smsReportedBankBalance?.let { verifiedBal ->
+                        Text(
+                            text = "Verified SMS Bank Bal: ${formatInr(verifiedBal)}",
+                            color = Color(0xFFD1FAE5),
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
                     }
@@ -664,23 +731,23 @@ private fun MoneyHomeDashboard(
             }
         }
 
-        // 3. Total Income & Total Expenses Side-by-Side Cards
+        // 3. Soft-Mint Total Income & Soft-Rose Total Expense Side-by-Side Cards (Panel 2)
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                IncomeExpenseStatCard(
+                IncomeExpensePillCard(
                     label = "Total Income",
-                    value = formatInr(summary.totalIncome),
+                    value = formatInr(summary.confirmedIncome),
                     isIncome = true,
                     modifier = Modifier
                         .weight(1f)
                         .testTag("money_total_income_card")
                 )
-                IncomeExpenseStatCard(
-                    label = "Total Expenses",
-                    value = formatInr(summary.totalExpense),
+                IncomeExpensePillCard(
+                    label = "Total Expense",
+                    value = formatInr(summary.confirmedExpense),
                     isIncome = false,
                     modifier = Modifier
                         .weight(1f)
@@ -689,171 +756,238 @@ private fun MoneyHomeDashboard(
             }
         }
 
-        // 4. This Month Dual Bar Chart Card + View All →
+        // 4. Compact SMS Fraud Shield / Pending Review / Reconciliation Banner
         item {
+            val hasFraud = summary.quarantinedCount > 0
+            val hasPending = summary.pendingCount > 0
+            val hasReconcileAlert = summary.reconciliationDiff?.let { abs(it) >= 1.0 } == true
+
+            val bannerBg = when {
+                hasFraud -> MoneySoftRed
+                hasPending || hasReconcileAlert -> MoneySoftAmber
+                else -> MoneySoftGreen
+            }
+            val bannerAccent = when {
+                hasFraud -> MoneyRed
+                hasPending || hasReconcileAlert -> MoneyAmber
+                else -> MoneyGreenDeep
+            }
+            val bannerTitle = when {
+                hasFraud -> "${summary.quarantinedCount} Fraud SMS Blocked"
+                hasPending -> "${summary.pendingCount} SMS Pending Review"
+                hasReconcileAlert -> "Balance Reconciliation Alert"
+                else -> "SMS Fraud Shield Active"
+            }
+            val reconcileDiffAmt = summary.reconciliationDiff
+            val bannerSubtitle = when {
+                hasFraud -> "Excluded ${formatInr(summary.quarantinedTotal)} from balance • Tap to inspect"
+                hasPending -> "Unverified SMS held safely out of balance • Tap to review"
+                hasReconcileAlert && reconcileDiffAmt != null -> "Verified SMS bank balance differs by ${formatInr(abs(reconcileDiffAmt))}"
+                else -> "${summary.smsTrackedCount} SMS checked • Tap for Trust Center & Tester"
+            }
+
             Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                color = MoneyCardWhite,
-                shadowElevation = 3.dp,
-                border = BorderStroke(1.dp, MoneyBorder)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        val tab = when {
+                            hasFraud -> TrustCenterTab.QUARANTINE
+                            hasPending -> TrustCenterTab.PENDING
+                            else -> TrustCenterTab.OVERVIEW
+                        }
+                        onOpenTrustCenter(tab)
+                    }
+                    .testTag("money_sms_trust_banner"),
+                shape = RoundedCornerShape(20.dp),
+                color = bannerBg,
+                border = BorderStroke(1.2.dp, bannerAccent.copy(alpha = 0.45f))
             ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(bannerAccent),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "This Month",
-                            color = MoneyInk,
-                            fontSize = 21.sp,
-                            fontWeight = FontWeight.Black
+                        Icon(
+                            imageVector = when {
+                                hasFraud -> Icons.Rounded.GppBad
+                                hasPending || hasReconcileAlert -> Icons.Rounded.Warning
+                                else -> Icons.Rounded.VerifiedUser
+                            },
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
                         )
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable(onClick = onViewAllTransactions)
-                                .padding(horizontal = 6.dp, vertical = 4.dp)
-                                .testTag("money_view_all_button"),
-                            verticalAlignment = Alignment.CenterVertically
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(bannerTitle, color = MoneyInk, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                        Text(bannerSubtitle, color = MoneySecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+                    }
+                    if (smsSyncing) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = bannerAccent, strokeWidth = 2.dp)
+                    } else {
+                        IconButton(
+                            onClick = onSyncSmsNow,
+                            modifier = Modifier.size(38.dp)
                         ) {
-                            Text(
-                                text = "View All",
-                                color = MoneyGreenMain,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
-                                contentDescription = null,
-                                tint = MoneyGreenMain,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Sync SMS", tint = bannerAccent)
                         }
                     }
-
-                    MonthlyDualBarChart(
-                        incomeBuckets = incomeBuckets,
-                        expenseBuckets = expenseBuckets
-                    )
                 }
             }
         }
 
-        // 5. Message Tracking Active Card (Matches Panel 2 bottom card)
+        // 5. "This Month Overview" Donut Ring + Category Legend Card (exact match to Panel 2)
         item {
-            val isLive = profile.moneySmsTrackingEnabled && hasSmsPermission
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onOpenMessageTracking)
-                    .testTag("money_message_tracking_card"),
-                shape = RoundedCornerShape(22.dp),
-                color = MoneyCardWhite,
-                shadowElevation = 3.dp,
-                border = BorderStroke(1.2.dp, if (isLive) MoneyGreenMain.copy(alpha = 0.4f) else MoneyBorder)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "This Month Overview",
+                        color = MoneyInk,
+                        fontSize = 21.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(onClick = onOpenAnalytics)
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                            .testTag("money_view_all_analytics_button"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("View All", color = MoneyGreenDeep, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(Icons.AutoMirrored.Rounded.ArrowForward, contentDescription = null, tint = MoneyGreenDeep, modifier = Modifier.size(18.dp))
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onOpenAnalytics),
+                    shape = RoundedCornerShape(24.dp),
+                    color = MoneyCardWhite,
+                    shadowElevation = 2.dp,
+                    border = BorderStroke(1.dp, MoneyBorder)
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clip(CircleShape)
-                                .background(if (isLive) MoneyGreenMain else CatFoodColor),
-                            contentAlignment = Alignment.Center
+                        AnalyticsDonutChart(
+                            slices = overviewSlices,
+                            totalExpense = monthSpent,
+                            centerLabel = "Spent"
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(11.dp)
                         ) {
-                            Icon(
-                                imageVector = if (isLive) Icons.Rounded.Check else Icons.Rounded.Sms,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(25.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (isLive) "Message Tracking Active" else "Enable SMS Tracking",
-                                color = MoneyInk,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Black
-                            )
-                            Text(
-                                text = if (isLive) {
-                                    "Auto track from SMS & UPI messages"
-                                } else {
-                                    "Tap switch to auto-read Bank & UPI SMS"
-                                },
-                                color = MoneySecondary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Switch(
-                            checked = isLive,
-                            onCheckedChange = onToggleMessageTracking,
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = MoneyGreenMain,
-                                uncheckedThumbColor = Color.White,
-                                uncheckedTrackColor = Color(0xFFCBD5E1)
-                            ),
-                            modifier = Modifier.testTag("money_sms_tracking_switch")
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "${summary.smsTrackedCount} SMS tracked • Tap for Tester & Sync",
-                            color = MoneyGreenMain,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                        if (smsSyncing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                color = MoneyGreenMain,
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Row(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(50))
-                                    .background(MoneySoftGreen)
-                                    .clickable(onClick = onSyncSmsNow)
-                                    .padding(horizontal = 10.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Refresh,
-                                    contentDescription = "Sync SMS",
-                                    tint = MoneyGreenDeep,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Sync SMS",
-                                    color = MoneyGreenDeep,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Black
-                                )
+                            overviewSlices.forEach { slice ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(11.dp)
+                                                .clip(CircleShape)
+                                                .background(slice.color)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = slice.name,
+                                            color = MoneyInk,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
+                                    }
+                                    Text(
+                                        text = "${slice.percent}%",
+                                        color = MoneyInk,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // 6. Warm Gold "You're on track!" Trophy Card (exact match to Panel 2)
+        item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Color(0xFFFFF8DB), Color(0xFFFEF3C7), Color(0xFFE7F9EE))
+                        )
+                    )
+                    .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(22.dp))
+                    .clickable(onClick = onOpenGoals)
+                    .padding(horizontal = 18.dp, vertical = 16.dp)
+                    .testTag("money_on_track_card")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFFDE68A).copy(alpha = 0.7f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.EmojiEvents,
+                            contentDescription = null,
+                            tint = Color(0xFFB45309),
+                            modifier = Modifier.size(34.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "You're on track!",
+                            color = MoneyInk,
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Text(
+                            text = "Save more, dream bigger.",
+                            color = MoneySecondary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.TrendingUp,
+                        contentDescription = null,
+                        tint = MoneyGreenMain,
+                        modifier = Modifier.size(34.dp)
+                    )
                 }
             }
         }
@@ -861,7 +995,7 @@ private fun MoneyHomeDashboard(
 }
 
 @Composable
-private fun IncomeExpenseStatCard(
+private fun IncomeExpensePillCard(
     label: String,
     value: String,
     isIncome: Boolean,
@@ -870,28 +1004,30 @@ private fun IncomeExpenseStatCard(
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(22.dp),
-        color = MoneyCardWhite,
-        shadowElevation = 3.dp,
-        border = BorderStroke(1.dp, MoneyBorder)
+        color = if (isIncome) Color(0xFFECFDF3) else Color(0xFFFFF1F2),
+        border = BorderStroke(
+            1.dp,
+            if (isIncome) MoneyGreenMain.copy(alpha = 0.25f) else MoneyRed.copy(alpha = 0.22f)
+        )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 16.dp),
+                .padding(horizontal = 13.dp, vertical = 15.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(42.dp)
                     .clip(CircleShape)
-                    .background(if (isIncome) MoneySoftGreen else MoneySoftRed),
+                    .background(if (isIncome) MoneyGreenBright else Color(0xFFF43F5E)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = if (isIncome) Icons.Rounded.ArrowDownward else Icons.Rounded.ArrowUpward,
                     contentDescription = label,
-                    tint = if (isIncome) MoneyGreenMain else MoneyRed,
-                    modifier = Modifier.size(23.dp)
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp)
                 )
             }
             Spacer(modifier = Modifier.width(10.dp))
@@ -900,7 +1036,7 @@ private fun IncomeExpenseStatCard(
                     text = label,
                     color = MoneySecondary,
                     fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.ExtraBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -917,36 +1053,30 @@ private fun IncomeExpenseStatCard(
     }
 }
 
-// --- PANEL 3: TRANSACTIONS / REPORTS SCREEN ---
+// --- PANEL 4: TRANSACTION HISTORY SCREEN ---
 
 @Composable
-private fun MoneyTransactionsTab(
+private fun MoneyTransactionHistoryScreen(
     transactions: List<MoneyTransaction>,
-    hasSmsPermission: Boolean,
+    summary: MoneySummaryState,
     smsSyncing: Boolean,
+    onBack: () -> Unit,
     onSyncSms: () -> Unit,
-    onAddManual: () -> Unit,
+    onOpenTrustCenter: (TrustCenterTab) -> Unit,
     onSelectTransaction: (MoneyTransaction) -> Unit,
     bottomPadding: PaddingValues
 ) {
     var selectedFilter by rememberSaveable { mutableStateOf("All") }
-    var searchVisible by rememberSaveable { mutableStateOf(false) }
-    var searchQuery by rememberSaveable { mutableStateOf("") }
 
-    val filtered = remember(transactions, selectedFilter, searchQuery) {
-        val q = searchQuery.trim().lowercase()
-        transactions.filter { tx ->
-            val matchesFilter = when (selectedFilter) {
-                "Income" -> tx.type == "INCOME"
-                "Expense" -> tx.type == "EXPENSE"
-                "UPI" -> tx.paymentMode.equals("UPI", ignoreCase = true)
-                else -> true
-            }
-            val matchesSearch = q.isEmpty() ||
-                tx.title.lowercase().contains(q) ||
-                tx.category.lowercase().contains(q) ||
-                tx.paymentMode.lowercase().contains(q)
-            matchesFilter && matchesSearch
+    // History shows CONFIRMED transactions by default so quarantined fraud never pollutes main history
+    val confirmedTransactions = remember(transactions) {
+        transactions.filter { it.status == TransactionStatus.CONFIRMED.key }
+    }
+    val filtered = remember(confirmedTransactions, selectedFilter) {
+        when (selectedFilter) {
+            "Income" -> confirmedTransactions.filter { it.type == "INCOME" }
+            "Expense" -> confirmedTransactions.filter { it.type == "EXPENSE" }
+            else -> confirmedTransactions
         }
     }
 
@@ -962,96 +1092,63 @@ private fun MoneyTransactionsTab(
         ),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Header
+        // Header (exact match to Panel 4)
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(MoneyCardWhite)
+                        .border(1.dp, MoneyBorder, CircleShape)
+                        .testTag("history_back_button")
+                ) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = MoneyInk)
+                }
                 Text(
-                    text = "Transactions",
+                    text = "Transaction History",
                     color = MoneyInk,
-                    fontSize = 28.sp,
+                    fontSize = 23.sp,
                     fontWeight = FontWeight.Black
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    IconButton(
-                        onClick = { searchVisible = !searchVisible },
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(CircleShape)
-                            .background(MoneyCardWhite)
-                            .border(1.dp, MoneyBorder, CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Search,
-                            contentDescription = "Search Transactions",
-                            tint = MoneyInk
-                        )
-                    }
-                    IconButton(
-                        onClick = onSyncSms,
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(CircleShape)
-                            .background(MoneyCardWhite)
-                            .border(1.dp, MoneyBorder, CircleShape)
-                    ) {
-                        if (smsSyncing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = MoneyGreenMain,
-                                strokeWidth = 2.4.dp
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Rounded.Refresh,
-                                contentDescription = "Sync SMS",
-                                tint = MoneyGreenMain
-                            )
-                        }
+                IconButton(
+                    onClick = onSyncSms,
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(MoneyCardWhite)
+                        .border(1.dp, MoneyBorder, CircleShape)
+                        .testTag("history_sync_button")
+                ) {
+                    if (smsSyncing) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = MoneyGreenMain, strokeWidth = 2.4.dp)
+                    } else {
+                        Icon(Icons.Rounded.CalendarMonth, contentDescription = "Sync SMS", tint = MoneyInk)
                     }
                 }
             }
         }
 
-        if (searchVisible) {
-            item {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search merchant, UPI, category...", fontWeight = FontWeight.SemiBold) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = MoneyCardWhite,
-                        unfocusedContainerColor = MoneyCardWhite,
-                        focusedBorderColor = MoneyGreenMain,
-                        unfocusedBorderColor = MoneyBorder,
-                        focusedTextColor = MoneyInk,
-                        unfocusedTextColor = MoneyInk
-                    )
-                )
-            }
-        }
-
-        // 4 Filter Pills (All | Income | Expense | UPI)
+        // Filter Pills: All | Income | Expense (matching Panel 4)
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                listOf("All", "Income", "Expense", "UPI").forEach { filter ->
+                listOf("All", "Income", "Expense").forEach { filter ->
                     val selected = selectedFilter == filter
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(50))
-                            .background(if (selected) MoneyGreenMain else MoneyChipBg)
+                            .background(if (selected) MoneyGreenDeep else MoneyChipBg)
                             .clickable { selectedFilter = filter }
-                            .padding(vertical = 11.dp)
+                            .padding(vertical = 12.dp)
                             .testTag("money_filter_$filter"),
                         contentAlignment = Alignment.Center
                     ) {
@@ -1061,6 +1158,65 @@ private fun MoneyTransactionsTab(
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Black
                         )
+                    }
+                }
+            }
+        }
+
+        // Quick jump chip if Pending or Quarantined SMS exist
+        if (summary.pendingCount > 0 || summary.quarantinedCount > 0) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (summary.pendingCount > 0) {
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onOpenTrustCenter(TrustCenterTab.PENDING) },
+                            shape = RoundedCornerShape(14.dp),
+                            color = MoneySoftAmber,
+                            border = BorderStroke(1.dp, MoneyAmber.copy(alpha = 0.5f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Rounded.GppMaybe, contentDescription = null, tint = MoneyAmber, modifier = Modifier.size(18.dp))
+                                Text(
+                                    text = "${summary.pendingCount} Pending Review",
+                                    color = MoneyInk,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                        }
+                    }
+                    if (summary.quarantinedCount > 0) {
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onOpenTrustCenter(TrustCenterTab.QUARANTINE) },
+                            shape = RoundedCornerShape(14.dp),
+                            color = MoneySoftRed,
+                            border = BorderStroke(1.dp, MoneyRed.copy(alpha = 0.5f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Rounded.GppBad, contentDescription = null, tint = MoneyRed, modifier = Modifier.size(18.dp))
+                                Text(
+                                    text = "${summary.quarantinedCount} Fraud Blocked",
+                                    color = MoneyRed,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1077,64 +1233,25 @@ private fun MoneyTransactionsTab(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(24.dp),
+                            .padding(28.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.AccountBalanceWallet,
-                            contentDescription = null,
-                            tint = MoneyGreenMain,
-                            modifier = Modifier.size(44.dp)
-                        )
+                        Icon(Icons.AutoMirrored.Rounded.ReceiptLong, contentDescription = null, tint = MoneyGreenMain, modifier = Modifier.size(44.dp))
+                        Text("No confirmed transactions yet", color = MoneyInk, fontSize = 19.sp, fontWeight = FontWeight.Black)
                         Text(
-                            text = "No Transactions Yet",
-                            color = MoneyInk,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Black
-                        )
-                        Text(
-                            text = "Sync your Bank & UPI SMS inbox or tap + to add an income or expense entry.",
+                            "Tap + to log income/expense or sync verified bank SMS in Trust Center.",
                             color = MoneySecondary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center
                         )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Button(
-                                onClick = onSyncSms,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MoneyGreenMain)
-                            ) {
-                                Text(
-                                    text = if (hasSmsPermission) "Sync SMS" else "Allow SMS",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
-                            }
-                            Button(
-                                onClick = onAddManual,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MoneyInk)
-                            ) {
-                                Text("+ Add Entry", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
-                            }
-                        }
                     }
                 }
             }
         } else {
             items(filtered, key = { it.id }) { tx ->
-                MoneyTransactionRowCard(
+                HistoryTransactionRow(
                     tx = tx,
                     onClick = { onSelectTransaction(tx) }
                 )
@@ -1144,12 +1261,12 @@ private fun MoneyTransactionsTab(
 }
 
 @Composable
-private fun MoneyTransactionRowCard(
+private fun HistoryTransactionRow(
     tx: MoneyTransaction,
     onClick: () -> Unit
 ) {
+    val vis = categoryVisualFor(tx.category)
     val isInc = tx.type == "INCOME"
-    val (icon, iconTint, iconBg) = transactionVisualStyle(tx)
 
     Surface(
         modifier = Modifier
@@ -1158,7 +1275,6 @@ private fun MoneyTransactionRowCard(
             .testTag("money_tx_row_${tx.id}"),
         shape = RoundedCornerShape(20.dp),
         color = MoneyCardWhite,
-        shadowElevation = 2.dp,
         border = BorderStroke(1.dp, MoneyBorder)
     ) {
         Row(
@@ -1169,164 +1285,170 @@ private fun MoneyTransactionRowCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(50.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(iconBg),
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(vis.bg),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = icon,
+                    imageVector = vis.icon,
                     contentDescription = tx.category,
-                    tint = iconTint,
+                    tint = vis.tint,
                     modifier = Modifier.size(26.dp)
                 )
             }
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = tx.title,
                     color = MoneyInk,
-                    fontSize = 17.sp,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Black,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "${tx.paymentMode} • ${formatTransactionDateLabel(tx.timestampMs)}" +
-                        if (tx.source == "SMS") " • SMS" else "",
-                    color = MoneySecondary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = formatTransactionDateLabel(tx.timestampMs),
+                        color = MoneySecondary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (tx.source == "SMS") {
+                        Text(
+                            text = "• Verified SMS",
+                            color = MoneyGreenMain,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
             }
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "${if (isInc) "+" else "-"}${formatInr(tx.amount)}",
+                text = "${if (isInc) "+ " else "- "}${formatInr(tx.amount)}",
                 color = if (isInc) MoneyGreenMain else MoneyRed,
-                fontSize = 18.sp,
+                fontSize = 19.sp,
                 fontWeight = FontWeight.Black
             )
         }
     }
 }
 
-private fun transactionVisualStyle(tx: MoneyTransaction): Triple<ImageVector, Color, Color> {
-    return when {
-        tx.category == "Food" -> Triple(Icons.Rounded.Restaurant, Color(0xFFEA580C), Color(0xFFFFEDD5))
-        tx.category == "Shopping" -> Triple(Icons.Rounded.ShoppingCart, Color(0xFFF97316), Color(0xFFFFF1E6))
-        tx.category == "Bills" && tx.title.contains("Recharge", ignoreCase = true) ->
-            Triple(Icons.Rounded.PhoneAndroid, Color(0xFF2563EB), Color(0xFFDBEAFE))
-        tx.category == "Bills" -> Triple(Icons.Rounded.Bolt, Color(0xFFD97706), Color(0xFFFEF3C7))
-        tx.category == "Travel" -> Triple(Icons.Rounded.DirectionsCar, MoneyGreenMain, MoneySoftGreen)
-        tx.category == "Salary" || tx.paymentMode == "Bank" ->
-            Triple(Icons.Rounded.AccountBalance, Color(0xFF2563EB), Color(0xFFE0ECFF))
-        tx.paymentMode == "UPI" -> Triple(Icons.Rounded.Payments, Color(0xFF6366F1), Color(0xFFEDE9FE))
-        else -> Triple(Icons.Rounded.AccountBalanceWallet, MoneyGreenMain, MoneySoftGreen)
-    }
-}
-
-// --- BOTTOM NAVIGATION BAR WITH RAISED GREEN "+" FAB (Matches Reference Panels 2, 3, 5, 6) ---
+// --- BOTTOM NAVIGATION BAR (Home | History | + FAB | Goals | Settings) ---
 
 @Composable
 private fun MoneyBottomNavBar(
-    currentTab: MoneyTab,
-    onSelectTab: (MoneyTab) -> Unit,
+    currentRoute: MoneyRoute,
+    onSelectRoute: (MoneyRoute) -> Unit,
     onAddClick: () -> Unit
 ) {
-    Surface(
-        color = MoneyCardWhite,
-        shadowElevation = 14.dp,
-        border = BorderStroke(1.dp, MoneyBorder)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding(),
+        contentAlignment = Alignment.BottomCenter
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceAround,
-            verticalAlignment = Alignment.CenterVertically
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MoneyCardWhite,
+            shadowElevation = 14.dp,
+            border = BorderStroke(1.dp, MoneyBorder)
         ) {
-            MoneyNavItem(
-                label = "Home",
-                icon = Icons.Rounded.Home,
-                selected = currentTab == MoneyTab.HOME,
-                onClick = { onSelectTab(MoneyTab.HOME) }
-            )
-            MoneyNavItem(
-                label = "Analytics",
-                icon = Icons.Rounded.BarChart,
-                selected = currentTab == MoneyTab.ANALYTICS,
-                onClick = { onSelectTab(MoneyTab.ANALYTICS) }
-            )
-
-            // Center Big Circular Green "+" Add Button
-            Box(
+            Row(
                 modifier = Modifier
-                    .offset(y = (-6).dp)
-                    .size(58.dp)
-                    .shadow(10.dp, CircleShape, spotColor = MoneyGreenMain)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(listOf(MoneyGreenBright, MoneyGreenMain))
-                    )
-                    .clickable(onClick = onAddClick)
-                    .testTag("money_center_add_fab"),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .height(72.dp)
+                    .padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.SpaceAround,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.Add,
-                    contentDescription = "Add Transaction",
-                    tint = Color.White,
-                    modifier = Modifier.size(32.dp)
+                BottomNavItem(
+                    label = "Home",
+                    icon = Icons.Rounded.Home,
+                    selected = currentRoute == MoneyRoute.HOME || currentRoute == MoneyRoute.ANALYTICS,
+                    onClick = { onSelectRoute(MoneyRoute.HOME) },
+                    modifier = Modifier.weight(1f).testTag("money_nav_home")
+                )
+                BottomNavItem(
+                    label = "History",
+                    icon = Icons.AutoMirrored.Rounded.ReceiptLong,
+                    selected = currentRoute == MoneyRoute.HISTORY,
+                    onClick = { onSelectRoute(MoneyRoute.HISTORY) },
+                    modifier = Modifier.weight(1f).testTag("money_nav_history")
+                )
+                Spacer(modifier = Modifier.width(66.dp))
+                BottomNavItem(
+                    label = "Goals",
+                    icon = Icons.Rounded.TrackChanges,
+                    selected = currentRoute == MoneyRoute.GOALS,
+                    onClick = { onSelectRoute(MoneyRoute.GOALS) },
+                    modifier = Modifier.weight(1f).testTag("money_nav_goals")
+                )
+                BottomNavItem(
+                    label = "Settings",
+                    icon = Icons.Rounded.Settings,
+                    selected = currentRoute == MoneyRoute.SETTINGS,
+                    onClick = { onSelectRoute(MoneyRoute.SETTINGS) },
+                    modifier = Modifier.weight(1f).testTag("money_nav_settings")
                 )
             }
+        }
 
-            MoneyNavItem(
-                label = "Reports",
-                icon = Icons.Rounded.Assessment,
-                selected = currentTab == MoneyTab.REPORTS,
-                onClick = { onSelectTab(MoneyTab.REPORTS) }
-            )
-            MoneyNavItem(
-                label = "More",
-                icon = Icons.Rounded.MoreHoriz,
-                selected = currentTab == MoneyTab.MORE,
-                onClick = { onSelectTab(MoneyTab.MORE) }
+        // Center Floating Circular Green + Button
+        Box(
+            modifier = Modifier
+                .offset(y = (-18).dp)
+                .size(64.dp)
+                .shadow(10.dp, CircleShape, spotColor = MoneyGreenDeep.copy(alpha = 0.45f))
+                .clip(CircleShape)
+                .background(Brush.linearGradient(listOf(MoneyGreenMain, MoneyGreenDeep)))
+                .border(4.dp, Color.White, CircleShape)
+                .clickable(onClick = onAddClick)
+                .testTag("money_nav_add_fab"),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Add,
+                contentDescription = "Add Transaction",
+                tint = Color.White,
+                modifier = Modifier.size(34.dp)
             )
         }
     }
 }
 
 @Composable
-private fun MoneyNavItem(
+private fun BottomNavItem(
     label: String,
     icon: ImageVector,
     selected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
+    val tint = if (selected) MoneyGreenDeep else MoneySecondary
     Column(
-        modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
+        modifier = modifier
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-            .testTag("money_nav_${label.lowercase()}"),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = if (selected) MoneyGreenMain else MoneySecondary,
-            modifier = Modifier.size(25.dp)
+            tint = tint,
+            modifier = Modifier.size(26.dp)
         )
-        Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = label,
-            color = if (selected) MoneyGreenMain else MoneySecondary,
+            color = tint,
             fontSize = 12.sp,
-            fontWeight = FontWeight.ExtraBold
+            fontWeight = if (selected) FontWeight.Black else FontWeight.Bold,
+            maxLines = 1
         )
     }
 }

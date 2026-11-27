@@ -27,10 +27,14 @@ import com.example.focus.isTimeSlotActiveNow
 import com.example.focus.parsePackageCsv
 import com.example.focus.remainingSecondsInSlot
 import com.example.focus.toPackageCsv
+import com.example.money.BankTemplateRegistry
 import com.example.money.ParsedSmsMoney
 import com.example.money.SmsInboxScanner
+import com.example.money.TransactionStatus
+import com.example.money.TrustClassification
 import com.example.money.formatInr
 import java.util.Calendar
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
@@ -91,17 +95,32 @@ data class QuizUiState(
 )
 
 data class MoneySummaryState(
-    val realBalance: Double = 0.0,
     val openingBalance: Double = 0.0,
-    val totalIncome: Double = 0.0,
-    val totalExpense: Double = 0.0,
+    val confirmedIncome: Double = 0.0,
+    val confirmedExpense: Double = 0.0,
+    val calculatedAppBalance: Double = 0.0,
     val thisWeekNet: Double = 0.0,
     val thisMonthIncome: Double = 0.0,
     val thisMonthExpense: Double = 0.0,
+    val lastMonthExpense: Double = 0.0,
     val monthlyBudget: Double = 10000.0,
-    val latestDetectedBankBalance: Double? = null,
+    val smsReportedBankBalance: Double? = null,
+    val unverifiedSmsBankBalance: Double? = null,
+    val pendingIncomeTotal: Double = 0.0,
+    val pendingExpenseTotal: Double = 0.0,
+    val pendingCount: Int = 0,
+    val quarantinedCount: Int = 0,
+    val quarantinedTotal: Double = 0.0,
+    val reconciliationDiff: Double? = null,
     val smsTrackedCount: Int = 0
-)
+) {
+    // Compatibility aliases so HomeScreen & summary views stay clean
+    val realBalance: Double get() = calculatedAppBalance
+    val totalIncome: Double get() = confirmedIncome
+    val totalExpense: Double get() = confirmedExpense
+    val pendingTotal: Double get() = pendingIncomeTotal + pendingExpenseTotal
+    val latestDetectedBankBalance: Double? get() = smsReportedBankBalance
+}
 
 class LifeViewModel(
     private val appContext: Context,
@@ -159,42 +178,87 @@ class LifeViewModel(
         val nowCal = Calendar.getInstance()
         val curMonth = nowCal.get(Calendar.MONTH)
         val curYear = nowCal.get(Calendar.YEAR)
+        val prevCal = Calendar.getInstance().apply { add(Calendar.MONTH, -1) }
+        val prevMonth = prevCal.get(Calendar.MONTH)
+        val prevYear = prevCal.get(Calendar.YEAR)
 
-        var totalInc = 0.0
-        var totalExp = 0.0
+        var confirmedInc = 0.0
+        var confirmedExp = 0.0
         var weekNet = 0.0
         var monthInc = 0.0
         var monthExp = 0.0
+        var lastMonthExp = 0.0
         var smsCount = 0
-        var latestBankBal: Double? = null
+        var verifiedBankBal: Double? = null
+        var unverifiedBankBal: Double? = null
+
+        var pendingInc = 0.0
+        var pendingExp = 0.0
+        var pendingCount = 0
+        var quarantinedCount = 0
+        var quarantinedTotal = 0.0
 
         val txCal = Calendar.getInstance()
         for (tx in txs) {
-            val isInc = tx.type == "INCOME"
-            if (isInc) totalInc += tx.amount else totalExp += tx.amount
-            if (tx.timestampMs >= weekAgo) {
-                weekNet += if (isInc) tx.amount else -tx.amount
-            }
-            txCal.timeInMillis = tx.timestampMs
-            if (txCal.get(Calendar.MONTH) == curMonth && txCal.get(Calendar.YEAR) == curYear) {
-                if (isInc) monthInc += tx.amount else monthExp += tx.amount
-            }
             if (tx.source == "SMS") smsCount++
-            if (latestBankBal == null && tx.detectedBankBalance != null) {
-                latestBankBal = tx.detectedBankBalance
+            val isInc = tx.type == "INCOME"
+
+            when (tx.status) {
+                TransactionStatus.CONFIRMED.key -> {
+                    if (isInc) confirmedInc += tx.amount else confirmedExp += tx.amount
+                    if (tx.timestampMs >= weekAgo) {
+                        weekNet += if (isInc) tx.amount else -tx.amount
+                    }
+                    txCal.timeInMillis = tx.timestampMs
+                    val m = txCal.get(Calendar.MONTH)
+                    val y = txCal.get(Calendar.YEAR)
+                    if (m == curMonth && y == curYear) {
+                        if (isInc) monthInc += tx.amount else monthExp += tx.amount
+                    } else if (m == prevMonth && y == prevYear && !isInc) {
+                        lastMonthExp += tx.amount
+                    }
+                    if (verifiedBankBal == null && tx.detectedBankBalance != null) {
+                        verifiedBankBal = tx.detectedBankBalance
+                    }
+                }
+                TransactionStatus.QUARANTINED.key -> {
+                    quarantinedCount++
+                    quarantinedTotal += tx.amount
+                    if (unverifiedBankBal == null && tx.detectedBankBalance != null) {
+                        unverifiedBankBal = tx.detectedBankBalance
+                    }
+                }
+                else -> { // PENDING_REVIEW
+                    pendingCount++
+                    if (isInc) pendingInc += tx.amount else pendingExp += tx.amount
+                    if (unverifiedBankBal == null && tx.detectedBankBalance != null) {
+                        unverifiedBankBal = tx.detectedBankBalance
+                    }
+                }
             }
         }
 
+        val calculatedBalance = p.moneyOpeningBalance + confirmedInc - confirmedExp
+        val diff = verifiedBankBal?.let { it - calculatedBalance }
+
         MoneySummaryState(
-            realBalance = p.moneyOpeningBalance + totalInc - totalExp,
             openingBalance = p.moneyOpeningBalance,
-            totalIncome = totalInc,
-            totalExpense = totalExp,
+            confirmedIncome = confirmedInc,
+            confirmedExpense = confirmedExp,
+            calculatedAppBalance = calculatedBalance,
             thisWeekNet = weekNet,
             thisMonthIncome = monthInc,
             thisMonthExpense = monthExp,
+            lastMonthExpense = lastMonthExp,
             monthlyBudget = p.moneyMonthlyBudget.coerceAtLeast(500.0),
-            latestDetectedBankBalance = latestBankBal,
+            smsReportedBankBalance = verifiedBankBal,
+            unverifiedSmsBankBalance = unverifiedBankBal,
+            pendingIncomeTotal = pendingInc,
+            pendingExpenseTotal = pendingExp,
+            pendingCount = pendingCount,
+            quarantinedCount = quarantinedCount,
+            quarantinedTotal = quarantinedTotal,
+            reconciliationDiff = diff,
             smsTrackedCount = smsCount
         )
     }.stateIn(
@@ -252,9 +316,22 @@ class LifeViewModel(
             repository.ensureUserProfile().onFailure {
                 _snackbarMessage.value = it.localizedMessage ?: "Could not initialize local profile."
             }
+            runSafeSmsReAuditIfNeeded()
         }
         observeFocusRulesForServiceSync()
         startLiveFocusEngineLoop()
+    }
+
+    private suspend fun runSafeSmsReAuditIfNeeded() {
+        val profile = repository.observeProfile().first() ?: return
+        if (profile.smsAuditMigrated) return
+        val customSenders = BankTemplateRegistry.parseCustomSendersCsv(profile.trustedSmsSendersCsv)
+        repository.reAuditImportedSmsTransactions(customSenders).onSuccess { (quarantined, pending) ->
+            repository.updateProfile { it.copy(smsAuditMigrated = true) }
+            if (quarantined > 0 || pending > 0) {
+                _snackbarMessage.value = "SMS Shield protected your balance: $quarantined fraud quarantined, $pending moved to review."
+            }
+        }
     }
 
     private fun observeFocusRulesForServiceSync() {
@@ -1074,13 +1151,25 @@ class LifeViewModel(
         viewModelScope.launch {
             _smsSyncing.value = true
             try {
-                val scanned = SmsInboxScanner.scanRecentBankSms(appContext)
+                val customSenders = BankTemplateRegistry.parseCustomSendersCsv(
+                    currentProfileOrDefault().trustedSmsSendersCsv
+                )
+                val scanned = SmsInboxScanner.scanRecentBankSms(
+                    context = appContext,
+                    customTrustedSenders = customSenders
+                )
                 repository.importParsedSmsTransactions(scanned)
-                    .onSuccess { added ->
-                        if (added > 0) {
-                            _snackbarMessage.value = "Synced $added new bank/UPI SMS transactions!"
+                    .onSuccess { (confirmed, pending, quarantined) ->
+                        val total = confirmed + pending + quarantined
+                        if (total > 0) {
+                            val parts = buildList {
+                                if (confirmed > 0) add("$confirmed confirmed")
+                                if (pending > 0) add("$pending pending review")
+                                if (quarantined > 0) add("$quarantined fraud blocked")
+                            }
+                            _snackbarMessage.value = "SMS Sync: ${parts.joinToString(" • ")}"
                         } else if (!silentIfZero) {
-                            _snackbarMessage.value = "All bank/UPI SMS transactions are already up to date."
+                            _snackbarMessage.value = "All bank & UPI SMS are already up to date."
                         }
                     }
                     .onFailure {
@@ -1092,12 +1181,32 @@ class LifeViewModel(
         }
     }
 
+    fun reAuditImportedSmsNow() {
+        viewModelScope.launch {
+            val customSenders = BankTemplateRegistry.parseCustomSendersCsv(
+                currentProfileOrDefault().trustedSmsSendersCsv
+            )
+            repository.reAuditImportedSmsTransactions(customSenders)
+                .onSuccess { (quarantined, pending) ->
+                    if (quarantined > 0 || pending > 0) {
+                        _snackbarMessage.value = "Re-audit complete: $quarantined fraud quarantined, $pending pending review."
+                    } else {
+                        _snackbarMessage.value = "All imported SMS already match current trust rules."
+                    }
+                }
+                .onFailure {
+                    _snackbarMessage.value = it.localizedMessage ?: "Could not re-audit SMS."
+                }
+        }
+    }
+
     fun addManualMoneyTransaction(
         title: String,
         amount: Double,
         type: String,
         category: String,
-        paymentMode: String
+        paymentMode: String,
+        timestampMs: Long = System.currentTimeMillis()
     ) {
         viewModelScope.launch {
             repository.addMoneyTransaction(
@@ -1106,7 +1215,11 @@ class LifeViewModel(
                 type = type,
                 category = category,
                 paymentMode = paymentMode,
-                source = "MANUAL"
+                source = "MANUAL",
+                status = TransactionStatus.CONFIRMED.key,
+                trustClassification = TrustClassification.TRUSTED_PATTERN.key,
+                userVerified = true,
+                timestampMs = timestampMs
             ).onSuccess {
                 val sign = if (type == "INCOME") "+" else "-"
                 _snackbarMessage.value = "Saved: $sign${formatInr(amount)} ($title)"
@@ -1125,20 +1238,124 @@ class LifeViewModel(
                 category = parsed.category,
                 paymentMode = parsed.paymentMode,
                 source = "SMS",
+                status = parsed.status.key,
+                trustClassification = parsed.trustClassification.key,
+                riskScore = parsed.riskScore,
+                flagReasonsCsv = parsed.flagReasons.joinToString("||"),
+                matchedTemplateId = parsed.matchedTemplateId,
+                accountSuffix = parsed.accountSuffix,
+                referenceId = parsed.referenceId,
+                userVerified = false,
                 smsSender = parsed.sender,
                 smsBody = parsed.rawBody,
                 smsSignature = parsed.smsSignature,
                 detectedBankBalance = parsed.detectedBankBalance,
                 timestampMs = parsed.timestampMs
             ).onSuccess { inserted ->
-                val sign = if (parsed.type == "INCOME") "+" else "-"
-                _snackbarMessage.value = if (inserted) {
-                    "SMS Added: $sign${formatInr(parsed.amount)} • ${parsed.title}"
+                if (!inserted) {
+                    _snackbarMessage.value = "Duplicate SMS skipped — already recorded."
                 } else {
-                    "This SMS transaction is already recorded."
+                    _snackbarMessage.value = when (parsed.status) {
+                        TransactionStatus.CONFIRMED -> {
+                            val sign = if (parsed.type == "INCOME") "+" else "-"
+                            "Confirmed SMS added: $sign${formatInr(parsed.amount)}"
+                        }
+                        TransactionStatus.QUARANTINED ->
+                            "Fraud SMS quarantined (excluded from balance)!"
+                        TransactionStatus.PENDING_REVIEW ->
+                            "Saved to Pending Review (excluded from balance until approved)."
+                    }
                 }
             }.onFailure {
-                _snackbarMessage.value = it.localizedMessage ?: "Could not add SMS transaction."
+                _snackbarMessage.value = it.localizedMessage ?: "Could not save SMS transaction."
+            }
+        }
+    }
+
+    fun approvePendingTransaction(tx: MoneyTransaction, alsoTrustSender: Boolean = false) {
+        viewModelScope.launch {
+            val updated = tx.copy(
+                status = TransactionStatus.CONFIRMED.key,
+                trustClassification = TrustClassification.TRUSTED_PATTERN.key,
+                userVerified = true
+            )
+            repository.updateMoneyTransaction(updated)
+                .onSuccess {
+                    if (alsoTrustSender && tx.smsSender.isNotBlank()) {
+                        addCustomTrustedSenderInternal(tx.smsSender)
+                    }
+                    _snackbarMessage.value = "Transaction confirmed & added to your balance."
+                }
+                .onFailure {
+                    _snackbarMessage.value = it.localizedMessage ?: "Could not confirm transaction."
+                }
+        }
+    }
+
+    fun quarantineTransaction(tx: MoneyTransaction) {
+        viewModelScope.launch {
+            val existingFlags = tx.flagReasonsList().toMutableList()
+            if (existingFlags.none { it.contains("Manually marked", ignoreCase = true) }) {
+                existingFlags.add("Manually marked as suspicious/fraud by user")
+            }
+            val updated = tx.copy(
+                status = TransactionStatus.QUARANTINED.key,
+                trustClassification = TrustClassification.HIGH_RISK.key,
+                riskScore = tx.riskScore.coerceAtLeast(80),
+                flagReasonsCsv = existingFlags.joinToString("||"),
+                userVerified = false
+            )
+            repository.updateMoneyTransaction(updated)
+                .onSuccess {
+                    _snackbarMessage.value = "Moved to Fraud Quarantine (excluded from balance)."
+                }
+                .onFailure {
+                    _snackbarMessage.value = it.localizedMessage ?: "Could not quarantine transaction."
+                }
+        }
+    }
+
+    fun updateManualTransaction(tx: MoneyTransaction) {
+        viewModelScope.launch {
+            repository.updateMoneyTransaction(tx.copy(userVerified = true))
+                .onSuccess { _snackbarMessage.value = "Transaction updated." }
+                .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Could not update transaction." }
+        }
+    }
+
+    private suspend fun addCustomTrustedSenderInternal(rawSender: String) {
+        val core = BankTemplateRegistry.extractCoreSenderHeader(rawSender)
+        if (core.length < 3 || BankTemplateRegistry.isPersonalPhoneNumber(rawSender)) return
+        repository.updateProfile { current ->
+            val updated = BankTemplateRegistry.parseCustomSendersCsv(current.trustedSmsSendersCsv) + core
+            current.copy(trustedSmsSendersCsv = BankTemplateRegistry.toCustomSendersCsv(updated))
+        }
+    }
+
+    fun addCustomTrustedSender(rawSender: String) {
+        val core = BankTemplateRegistry.extractCoreSenderHeader(rawSender)
+        if (core.length < 3) {
+            _snackbarMessage.value = "Enter a valid bank sender header (e.g. HDFCBK or SBIUPI)."
+            return
+        }
+        if (BankTemplateRegistry.isPersonalPhoneNumber(rawSender)) {
+            _snackbarMessage.value = "Personal phone numbers cannot be added as trusted bank senders."
+            return
+        }
+        viewModelScope.launch {
+            addCustomTrustedSenderInternal(rawSender)
+            _snackbarMessage.value = "Trusted sender added: $core"
+        }
+    }
+
+    fun removeCustomTrustedSender(header: String) {
+        val core = BankTemplateRegistry.extractCoreSenderHeader(header)
+        viewModelScope.launch {
+            repository.updateProfile { current ->
+                val updated = BankTemplateRegistry.parseCustomSendersCsv(current.trustedSmsSendersCsv) - core
+                current.copy(trustedSmsSendersCsv = BankTemplateRegistry.toCustomSendersCsv(updated))
+            }.onSuccess {
+                _snackbarMessage.value = "Removed trusted sender: $core"
             }
         }
     }
@@ -1148,6 +1365,22 @@ class LifeViewModel(
             repository.deleteMoneyTransaction(txId)
                 .onSuccess { _snackbarMessage.value = "Transaction deleted." }
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Could not delete transaction." }
+        }
+    }
+
+    fun deleteAllImportedSmsTransactions() {
+        viewModelScope.launch {
+            repository.deleteAllImportedSmsTransactions()
+                .onSuccess { _snackbarMessage.value = "All imported SMS transactions deleted. Manual entries kept safe." }
+                .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Could not delete SMS data." }
+        }
+    }
+
+    fun deleteAllQuarantinedTransactions() {
+        viewModelScope.launch {
+            repository.deleteAllQuarantinedTransactions()
+                .onSuccess { _snackbarMessage.value = "All quarantined fraud SMS deleted." }
+                .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Could not clear quarantine." }
         }
     }
 
@@ -1172,6 +1405,25 @@ class LifeViewModel(
         viewModelScope.launch {
             repository.updateProfile { it.copy(moneyOpeningBalance = clean) }
                 .onSuccess { _snackbarMessage.value = "Opening balance updated to ${formatInr(clean)}" }
+        }
+    }
+
+    fun updateSavingsGoal(name: String, target: Double, saved: Double, targetDate: String) {
+        val cleanName = name.trim().take(60).ifEmpty { "Save ₹10,000" }
+        val cleanTarget = target.coerceIn(100.0, 100_000_000.0)
+        val cleanSaved = saved.coerceIn(0.0, cleanTarget * 2.0)
+        val cleanDate = targetDate.trim().take(32).ifEmpty { "Dec 31, 2026" }
+        viewModelScope.launch {
+            repository.updateProfile {
+                it.copy(
+                    savingsGoalName = cleanName,
+                    savingsGoalTarget = cleanTarget,
+                    savingsGoalSaved = cleanSaved,
+                    savingsGoalTargetDate = cleanDate
+                )
+            }.onSuccess {
+                _snackbarMessage.value = "Savings goal updated!"
+            }
         }
     }
 

@@ -1,7 +1,11 @@
 package com.example.data
 
+import com.example.money.SmsMoneyParser
+import com.example.money.TransactionStatus
+import com.example.money.TrustClassification
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -117,6 +121,14 @@ class LifeRepository(private val dao: LifeDao) {
         category: String,
         paymentMode: String,
         source: String = "MANUAL",
+        status: String = TransactionStatus.CONFIRMED.key,
+        trustClassification: String = TrustClassification.TRUSTED_PATTERN.key,
+        riskScore: Int = 0,
+        flagReasonsCsv: String = "",
+        matchedTemplateId: String = "",
+        accountSuffix: String = "",
+        referenceId: String = "",
+        userVerified: Boolean = (source == "MANUAL"),
         smsSender: String = "",
         smsBody: String = "",
         smsSignature: String = "",
@@ -142,6 +154,14 @@ class LifeRepository(private val dao: LifeDao) {
                 category = cleanCategory,
                 paymentMode = cleanMode,
                 source = source,
+                status = status,
+                trustClassification = trustClassification,
+                riskScore = riskScore.coerceIn(0, 100),
+                flagReasonsCsv = flagReasonsCsv.take(600),
+                matchedTemplateId = matchedTemplateId.take(60),
+                accountSuffix = accountSuffix.take(12),
+                referenceId = referenceId.take(32),
+                userVerified = userVerified,
                 smsSender = smsSender.take(40),
                 smsBody = smsBody.take(500),
                 smsSignature = sig,
@@ -157,14 +177,98 @@ class LifeRepository(private val dao: LifeDao) {
         Result.failure(e)
     }
 
-    suspend fun importParsedSmsTransactions(transactions: List<MoneyTransaction>): Result<Int> = try {
+    suspend fun importParsedSmsTransactions(transactions: List<MoneyTransaction>): Result<Triple<Int, Int, Int>> = try {
         if (transactions.isEmpty()) {
-            Result.success(0)
+            Result.success(Triple(0, 0, 0))
         } else {
             val rowIds = dao.insertMoneyTransactionsIgnore(transactions)
-            val insertedCount = rowIds.count { it != -1L }
-            Result.success(insertedCount)
+            var confirmedAdded = 0
+            var pendingAdded = 0
+            var quarantinedAdded = 0
+            rowIds.forEachIndexed { index, rowId ->
+                if (rowId != -1L) {
+                    when (transactions[index].status) {
+                        TransactionStatus.CONFIRMED.key -> confirmedAdded++
+                        TransactionStatus.QUARANTINED.key -> quarantinedAdded++
+                        else -> pendingAdded++
+                    }
+                }
+            }
+            Result.success(Triple(confirmedAdded, pendingAdded, quarantinedAdded))
         }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    suspend fun updateMoneyTransaction(tx: MoneyTransaction): Result<Unit> = runSafe {
+        require(tx.id.isNotBlank())
+        require(tx.amount > 0.0 && tx.amount <= 100_000_000.0) { "Amount must be greater than zero." }
+        dao.updateMoneyTransaction(
+            tx.copy(
+                title = tx.title.trim().take(80).ifEmpty { tx.title },
+                category = tx.category.trim().take(32).ifEmpty { "Others" },
+                paymentMode = tx.paymentMode.trim().take(24).ifEmpty { "UPI" }
+            )
+        )
+    }
+
+    /**
+     * Safe migration & re-audit for previously imported SMS rows:
+     * Preserves all manual entries and user-verified transactions untouched.
+     * Re-evaluates unverified SMS rows through SmsMoneyParser V1 so previously
+     * auto-accepted scam/unverified SMS are cleanly moved to QUARANTINED or PENDING_REVIEW.
+     */
+    suspend fun reAuditImportedSmsTransactions(
+        customTrustedSenders: Set<String>
+    ): Result<Pair<Int, Int>> = try {
+        val all = dao.observeMoneyTransactions().first()
+        var movedToQuarantine = 0
+        var movedToPending = 0
+
+        for (tx in all) {
+            if (tx.source != "SMS" || tx.userVerified) continue
+            if (tx.smsBody.isBlank()) continue
+
+            val reParsed = SmsMoneyParser.parse(
+                body = tx.smsBody,
+                sender = tx.smsSender,
+                timestampMs = tx.timestampMs,
+                customTrustedSenders = customTrustedSenders
+            )
+
+            if (reParsed != null) {
+                val updated = tx.copy(
+                    status = reParsed.status.key,
+                    trustClassification = reParsed.trustClassification.key,
+                    riskScore = reParsed.riskScore,
+                    flagReasonsCsv = reParsed.flagReasons.joinToString("||"),
+                    matchedTemplateId = reParsed.matchedTemplateId,
+                    accountSuffix = reParsed.accountSuffix.ifBlank { tx.accountSuffix },
+                    referenceId = reParsed.referenceId.ifBlank { tx.referenceId }
+                )
+                if (updated != tx) {
+                    dao.updateMoneyTransaction(updated)
+                    if (reParsed.status == TransactionStatus.QUARANTINED && tx.status != TransactionStatus.QUARANTINED.key) {
+                        movedToQuarantine++
+                    } else if (reParsed.status == TransactionStatus.PENDING_REVIEW && tx.status == TransactionStatus.CONFIRMED.key) {
+                        movedToPending++
+                    }
+                }
+            } else if (tx.status == TransactionStatus.CONFIRMED.key) {
+                // Previously imported non-transactional SMS -> hold for review instead of silently deleting
+                val updated = tx.copy(
+                    status = TransactionStatus.PENDING_REVIEW.key,
+                    trustClassification = TrustClassification.REVIEW_REQUIRED.key,
+                    riskScore = 50,
+                    flagReasonsCsv = "Re-audit could not verify this SMS as a valid bank transaction"
+                )
+                dao.updateMoneyTransaction(updated)
+                movedToPending++
+            }
+        }
+        Result.success(movedToQuarantine to movedToPending)
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
@@ -174,6 +278,14 @@ class LifeRepository(private val dao: LifeDao) {
     suspend fun deleteMoneyTransaction(txId: String): Result<Unit> = runSafe {
         require(txId.isNotBlank())
         dao.deleteMoneyTransaction(txId)
+    }
+
+    suspend fun deleteAllImportedSmsTransactions(): Result<Unit> = runSafe {
+        dao.deleteAllImportedSmsTransactions()
+    }
+
+    suspend fun deleteAllQuarantinedTransactions(): Result<Unit> = runSafe {
+        dao.deleteAllQuarantinedTransactions()
     }
 
     suspend fun clearAllMoneyTransactions(): Result<Unit> = runSafe {

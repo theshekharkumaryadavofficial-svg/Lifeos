@@ -32,7 +32,8 @@ object SmsInboxScanner {
     suspend fun scanRecentBankSms(
         context: Context,
         daysBack: Int = 90,
-        maxMessages: Int = 600
+        maxMessages: Int = 600,
+        customTrustedSenders: Set<String> = emptySet()
     ): List<MoneyTransaction> = withContext(Dispatchers.IO) {
         if (!hasReadSmsPermission(context)) return@withContext emptyList()
 
@@ -63,7 +64,7 @@ object SmsInboxScanner {
 
                 while (cursor.moveToNext() && scanned < maxMessages) {
                     scanned++
-                    val sender = if (addrIdx >= 0) cursor.getString(addrIdx).orEmpty() else "BANK"
+                    val sender = if (addrIdx >= 0) cursor.getString(addrIdx).orEmpty() else ""
                     val body = if (bodyIdx >= 0) cursor.getString(bodyIdx).orEmpty() else ""
                     val dateMs = if (dateIdx >= 0) cursor.getLong(dateIdx) else System.currentTimeMillis()
                     if (body.isBlank()) continue
@@ -71,7 +72,8 @@ object SmsInboxScanner {
                     val parsed = SmsMoneyParser.parse(
                         body = body,
                         sender = sender,
-                        timestampMs = dateMs
+                        timestampMs = dateMs,
+                        customTrustedSenders = customTrustedSenders
                     )
                     if (parsed != null) {
                         parsedList.add(parsed.toEntity())

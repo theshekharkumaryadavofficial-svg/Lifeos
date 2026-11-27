@@ -38,12 +38,16 @@ class MoneySmsReceiver : BroadcastReceiver() {
                 if (profile != null && !profile.moneySmsTrackingEnabled) {
                     return@launch
                 }
+                val customTrusted = BankTemplateRegistry.parseCustomSendersCsv(
+                    profile?.trustedSmsSendersCsv.orEmpty()
+                )
 
                 for ((sender, bodyBuilder) in groupedBySender) {
                     val parsed = SmsMoneyParser.parse(
                         body = bodyBuilder.toString(),
                         sender = sender,
-                        timestampMs = latestTimestamp
+                        timestampMs = latestTimestamp,
+                        customTrustedSenders = customTrusted
                     )
                     if (parsed != null) {
                         dao.insertMoneyTransactionIgnore(parsed.toEntity())
