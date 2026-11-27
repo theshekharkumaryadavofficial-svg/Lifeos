@@ -38,6 +38,10 @@ class LifeRepository(private val dao: LifeDao) {
                     focusModeEnabled = false,
                     globalBlockedPackagesCsv = DEFAULT_BLOCKED_PACKAGES_CSV,
                     focusMotivationQuote = DEFAULT_FOCUS_QUOTE,
+                    moneyOpeningBalance = 0.0,
+                    moneyMonthlyBudget = 10000.0,
+                    moneySmsTrackingEnabled = true,
+                    moneyOnboardingSeen = false,
                     totalNaamJapCount = 0L,
                     todayNaamJapCount = 0L,
                     todayMalas = 0L,
@@ -100,6 +104,80 @@ class LifeRepository(private val dao: LifeDao) {
             todayMalas = 0L,
             todayWaterGlasses = 0L
         )
+    }
+
+    // --- MONEY TRANSACTIONS ---
+
+    fun observeMoneyTransactions(): Flow<List<MoneyTransaction>> = dao.observeMoneyTransactions()
+
+    suspend fun addMoneyTransaction(
+        title: String,
+        amount: Double,
+        type: String,
+        category: String,
+        paymentMode: String,
+        source: String = "MANUAL",
+        smsSender: String = "",
+        smsBody: String = "",
+        smsSignature: String = "",
+        detectedBankBalance: Double? = null,
+        timestampMs: Long = System.currentTimeMillis()
+    ): Result<Boolean> = try {
+        require(amount > 0.0 && amount <= 100_000_000.0) { "Amount must be greater than zero." }
+        val cleanTitle = title.trim().take(80).ifEmpty {
+            if (type == "INCOME") "Income Credit" else "Expense Payment"
+        }
+        val cleanType = if (type == "INCOME") "INCOME" else "EXPENSE"
+        val cleanCategory = category.trim().take(32).ifEmpty { "Others" }
+        val cleanMode = paymentMode.trim().take(24).ifEmpty { "UPI" }
+        val id = UUID.randomUUID().toString()
+        val sig = smsSignature.ifBlank { "manual_${id}" }
+        val rowId = dao.insertMoneyTransactionIgnore(
+            MoneyTransaction(
+                id = id,
+                userId = "local_user",
+                title = cleanTitle,
+                amount = amount,
+                type = cleanType,
+                category = cleanCategory,
+                paymentMode = cleanMode,
+                source = source,
+                smsSender = smsSender.take(40),
+                smsBody = smsBody.take(500),
+                smsSignature = sig,
+                detectedBankBalance = detectedBankBalance,
+                timestampMs = timestampMs,
+                createdAt = System.currentTimeMillis()
+            )
+        )
+        Result.success(rowId != -1L)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    suspend fun importParsedSmsTransactions(transactions: List<MoneyTransaction>): Result<Int> = try {
+        if (transactions.isEmpty()) {
+            Result.success(0)
+        } else {
+            val rowIds = dao.insertMoneyTransactionsIgnore(transactions)
+            val insertedCount = rowIds.count { it != -1L }
+            Result.success(insertedCount)
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    suspend fun deleteMoneyTransaction(txId: String): Result<Unit> = runSafe {
+        require(txId.isNotBlank())
+        dao.deleteMoneyTransaction(txId)
+    }
+
+    suspend fun clearAllMoneyTransactions(): Result<Unit> = runSafe {
+        dao.clearAllMoneyTransactions()
     }
 
     // --- STUDY TIME SLOTS ---

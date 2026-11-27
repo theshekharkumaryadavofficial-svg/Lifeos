@@ -23,11 +23,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.AccountBalanceWallet
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.FitnessCenter
 import androidx.compose.material.icons.rounded.LocalFireDepartment
-import androidx.compose.material.icons.rounded.MenuBook
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.SelfImprovement
@@ -76,6 +76,7 @@ import com.example.ui.theme.EmeraldHealth
 import com.example.ui.theme.GlassBorder
 import com.example.ui.theme.GlassBorderWarm
 import com.example.ui.theme.MysticPurple
+import com.example.money.formatInrCompact
 import com.example.ui.theme.ObsidianBg
 import com.example.ui.theme.SaffronDevotion
 import com.example.ui.theme.TextOnDark
@@ -86,6 +87,7 @@ import java.util.Calendar
 @Composable
 fun HomeScreen(
     viewModel: LifeViewModel,
+    onNavigateToMoneyTracker: () -> Unit,
     onNavigateToStudy: () -> Unit,
     onNavigateToNaamJap: () -> Unit,
     onNavigateToFitness: () -> Unit,
@@ -97,6 +99,7 @@ fun HomeScreen(
     val profileUi by viewModel.profileState.collectAsStateWithLifecycle()
     val tasksUi by viewModel.tasksState.collectAsStateWithLifecycle()
     val workoutsUi by viewModel.workoutsState.collectAsStateWithLifecycle()
+    val moneySummary by viewModel.moneySummary.collectAsStateWithLifecycle()
 
     val profile = (profileUi as? UiState.Success)?.data ?: UserProfile()
     val tasks = (tasksUi as? UiState.Success)?.data.orEmpty()
@@ -399,20 +402,18 @@ fun HomeScreen(
                 )
             }
 
-            // 5. Four Glowing Quick-Action Tiles (Study, Naam Jap, Fitness, AI Tutor)
+            // 5. Four Glowing Quick-Action Tiles (Real Balance Money Tracker, Naam Jap, Fitness, AI Tutor)
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    QuickActionTile(
-                        title = "Study",
-                        icon = Icons.Rounded.MenuBook,
-                        glowColor = CrimsonGlow,
-                        onClick = onNavigateToStudy,
+                    MoneyBalanceQuickTile(
+                        balanceText = formatInrCompact(moneySummary.realBalance),
+                        onClick = onNavigateToMoneyTracker,
                         modifier = Modifier
                             .weight(1f)
-                            .testTag("home_tile_study")
+                            .testTag("home_tile_money_tracker")
                     )
                     QuickActionTile(
                         title = "Naam Jap",
@@ -658,6 +659,63 @@ private fun QuickActionTile(
             ),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun MoneyBalanceQuickTile(
+    balanceText: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(18.dp)
+    Column(
+        modifier = modifier
+            .clip(shape)
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF0A3A24), Color(0xFF0C231A))
+                )
+            )
+            .border(1.8.dp, EmeraldHealth.copy(alpha = 0.85f), shape)
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(
+                    Brush.radialGradient(
+                        listOf(Color(0xFF1CD172), EmeraldHealth.copy(alpha = 0.45f))
+                    )
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.AccountBalanceWallet,
+                contentDescription = "Money Tracker",
+                tint = Color.White,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(5.dp))
+        Text(
+            text = balanceText,
+            color = Color(0xFF6EF5B1),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = "Balance",
+            color = TextOnDark,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.ExtraBold,
+            maxLines = 1
         )
     }
 }

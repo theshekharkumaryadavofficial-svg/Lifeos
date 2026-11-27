@@ -24,6 +24,25 @@ interface LifeDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertProfile(profile: UserProfile)
 
+    // Money Transactions
+    @Query("SELECT * FROM money_transactions ORDER BY timestampMs DESC, createdAt DESC")
+    fun observeMoneyTransactions(): Flow<List<MoneyTransaction>>
+
+    @Query("SELECT * FROM money_transactions ORDER BY timestampMs DESC, createdAt DESC")
+    suspend fun getMoneyTransactionsOnce(): List<MoneyTransaction>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMoneyTransactionIgnore(tx: MoneyTransaction): Long
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMoneyTransactionsIgnore(txList: List<MoneyTransaction>): List<Long>
+
+    @Query("DELETE FROM money_transactions WHERE id = :txId")
+    suspend fun deleteMoneyTransaction(txId: String)
+
+    @Query("DELETE FROM money_transactions")
+    suspend fun clearAllMoneyTransactions()
+
     // Study Time Slots
     @Query("SELECT * FROM study_time_slots ORDER BY startHour ASC, startMinute ASC, createdAt ASC")
     fun observeTimeSlots(): Flow<List<StudyTimeSlot>>
@@ -101,6 +120,7 @@ interface LifeDao {
 @Database(
     entities = [
         UserProfile::class,
+        MoneyTransaction::class,
         StudyTimeSlot::class,
         LifeTask::class,
         StudySubject::class,
@@ -108,7 +128,7 @@ interface LifeDao {
         WorkoutLog::class,
         SadhanaLog::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class LifeDatabase : RoomDatabase() {
@@ -158,6 +178,46 @@ abstract class LifeDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN moneyOpeningBalance REAL NOT NULL DEFAULT 0.0"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN moneyMonthlyBudget REAL NOT NULL DEFAULT 10000.0"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN moneySmsTrackingEnabled INTEGER NOT NULL DEFAULT 1"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN moneyOnboardingSeen INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS money_transactions (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        userId TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        amount REAL NOT NULL,
+                        type TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        paymentMode TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        smsSender TEXT NOT NULL,
+                        smsBody TEXT NOT NULL,
+                        smsSignature TEXT NOT NULL,
+                        detectedBankBalance REAL,
+                        timestampMs INTEGER NOT NULL,
+                        createdAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_money_transactions_smsSignature ON money_transactions (smsSignature)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): LifeDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -165,7 +225,7 @@ abstract class LifeDatabase : RoomDatabase() {
                     LifeDatabase::class.java,
                     "lifeos_local.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { INSTANCE = it }

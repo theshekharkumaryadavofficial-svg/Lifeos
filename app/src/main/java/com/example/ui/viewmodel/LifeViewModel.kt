@@ -9,6 +9,7 @@ import com.example.data.AiTutorRepository
 import com.example.data.DEFAULT_FOCUS_QUOTE
 import com.example.data.LifeRepository
 import com.example.data.LifeTask
+import com.example.data.MoneyTransaction
 import com.example.data.QuizQuestion
 import com.example.data.SadhanaLog
 import com.example.data.StudyNote
@@ -26,6 +27,10 @@ import com.example.focus.isTimeSlotActiveNow
 import com.example.focus.parsePackageCsv
 import com.example.focus.remainingSecondsInSlot
 import com.example.focus.toPackageCsv
+import com.example.money.ParsedSmsMoney
+import com.example.money.SmsInboxScanner
+import com.example.money.formatInr
+import java.util.Calendar
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
@@ -85,6 +90,19 @@ data class QuizUiState(
     val error: String? = null
 )
 
+data class MoneySummaryState(
+    val realBalance: Double = 0.0,
+    val openingBalance: Double = 0.0,
+    val totalIncome: Double = 0.0,
+    val totalExpense: Double = 0.0,
+    val thisWeekNet: Double = 0.0,
+    val thisMonthIncome: Double = 0.0,
+    val thisMonthExpense: Double = 0.0,
+    val monthlyBudget: Double = 10000.0,
+    val latestDetectedBankBalance: Double? = null,
+    val smsTrackedCount: Int = 0
+)
+
 class LifeViewModel(
     private val appContext: Context,
     private val repository: LifeRepository,
@@ -124,6 +142,66 @@ class LifeViewModel(
 
     val sadhanaLogsState: StateFlow<UiState<List<SadhanaLog>>> =
         repository.observeSadhanaLogs().toSafeUiState("sadhana logs")
+
+    val moneyTransactionsState: StateFlow<UiState<List<MoneyTransaction>>> =
+        repository.observeMoneyTransactions().toSafeUiState("money transactions")
+
+    private val _smsSyncing = MutableStateFlow(false)
+    val smsSyncing: StateFlow<Boolean> = _smsSyncing.asStateFlow()
+
+    val moneySummary: StateFlow<MoneySummaryState> = combine(
+        repository.observeProfile(),
+        repository.observeMoneyTransactions()
+    ) { profile, txs ->
+        val p = profile ?: UserProfile()
+        val now = System.currentTimeMillis()
+        val weekAgo = now - 7L * 24L * 60L * 60L * 1000L
+        val nowCal = Calendar.getInstance()
+        val curMonth = nowCal.get(Calendar.MONTH)
+        val curYear = nowCal.get(Calendar.YEAR)
+
+        var totalInc = 0.0
+        var totalExp = 0.0
+        var weekNet = 0.0
+        var monthInc = 0.0
+        var monthExp = 0.0
+        var smsCount = 0
+        var latestBankBal: Double? = null
+
+        val txCal = Calendar.getInstance()
+        for (tx in txs) {
+            val isInc = tx.type == "INCOME"
+            if (isInc) totalInc += tx.amount else totalExp += tx.amount
+            if (tx.timestampMs >= weekAgo) {
+                weekNet += if (isInc) tx.amount else -tx.amount
+            }
+            txCal.timeInMillis = tx.timestampMs
+            if (txCal.get(Calendar.MONTH) == curMonth && txCal.get(Calendar.YEAR) == curYear) {
+                if (isInc) monthInc += tx.amount else monthExp += tx.amount
+            }
+            if (tx.source == "SMS") smsCount++
+            if (latestBankBal == null && tx.detectedBankBalance != null) {
+                latestBankBal = tx.detectedBankBalance
+            }
+        }
+
+        MoneySummaryState(
+            realBalance = p.moneyOpeningBalance + totalInc - totalExp,
+            openingBalance = p.moneyOpeningBalance,
+            totalIncome = totalInc,
+            totalExpense = totalExp,
+            thisWeekNet = weekNet,
+            thisMonthIncome = monthInc,
+            thisMonthExpense = monthExp,
+            monthlyBudget = p.moneyMonthlyBudget.coerceAtLeast(500.0),
+            latestDetectedBankBalance = latestBankBal,
+            smsTrackedCount = smsCount
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
+        initialValue = MoneySummaryState()
+    )
 
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
@@ -959,6 +1037,141 @@ class LifeViewModel(
                     e.localizedMessage ?: "Could not analyze progress right now."
                 )
             }
+        }
+    }
+
+    // --- MONEY TRACKER & SMS ENGINE ACTIONS ---
+
+    fun markMoneyOnboardingSeen() {
+        viewModelScope.launch {
+            repository.updateProfile { it.copy(moneyOnboardingSeen = true) }
+        }
+    }
+
+    fun setMoneySmsTrackingEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.updateProfile { it.copy(moneySmsTrackingEnabled = enabled) }
+                .onSuccess {
+                    if (enabled && SmsInboxScanner.hasReadSmsPermission(appContext)) {
+                        syncBankSmsInbox(silentIfZero = false)
+                    } else {
+                        _snackbarMessage.value = if (enabled) {
+                            "Message Tracking ON • Grant SMS permission to auto-sync"
+                        } else {
+                            "Message Tracking paused"
+                        }
+                    }
+                }
+        }
+    }
+
+    fun syncBankSmsInbox(silentIfZero: Boolean = false) {
+        if (_smsSyncing.value) return
+        if (!SmsInboxScanner.hasReadSmsPermission(appContext)) {
+            _snackbarMessage.value = "SMS permission needed to read bank & UPI messages."
+            return
+        }
+        viewModelScope.launch {
+            _smsSyncing.value = true
+            try {
+                val scanned = SmsInboxScanner.scanRecentBankSms(appContext)
+                repository.importParsedSmsTransactions(scanned)
+                    .onSuccess { added ->
+                        if (added > 0) {
+                            _snackbarMessage.value = "Synced $added new bank/UPI SMS transactions!"
+                        } else if (!silentIfZero) {
+                            _snackbarMessage.value = "All bank/UPI SMS transactions are already up to date."
+                        }
+                    }
+                    .onFailure {
+                        _snackbarMessage.value = it.localizedMessage ?: "Could not save scanned SMS transactions."
+                    }
+            } finally {
+                _smsSyncing.value = false
+            }
+        }
+    }
+
+    fun addManualMoneyTransaction(
+        title: String,
+        amount: Double,
+        type: String,
+        category: String,
+        paymentMode: String
+    ) {
+        viewModelScope.launch {
+            repository.addMoneyTransaction(
+                title = title,
+                amount = amount,
+                type = type,
+                category = category,
+                paymentMode = paymentMode,
+                source = "MANUAL"
+            ).onSuccess {
+                val sign = if (type == "INCOME") "+" else "-"
+                _snackbarMessage.value = "Saved: $sign${formatInr(amount)} ($title)"
+            }.onFailure {
+                _snackbarMessage.value = it.localizedMessage ?: "Failed to save transaction."
+            }
+        }
+    }
+
+    fun addParsedSmsTransaction(parsed: ParsedSmsMoney) {
+        viewModelScope.launch {
+            repository.addMoneyTransaction(
+                title = parsed.title,
+                amount = parsed.amount,
+                type = parsed.type,
+                category = parsed.category,
+                paymentMode = parsed.paymentMode,
+                source = "SMS",
+                smsSender = parsed.sender,
+                smsBody = parsed.rawBody,
+                smsSignature = parsed.smsSignature,
+                detectedBankBalance = parsed.detectedBankBalance,
+                timestampMs = parsed.timestampMs
+            ).onSuccess { inserted ->
+                val sign = if (parsed.type == "INCOME") "+" else "-"
+                _snackbarMessage.value = if (inserted) {
+                    "SMS Added: $sign${formatInr(parsed.amount)} • ${parsed.title}"
+                } else {
+                    "This SMS transaction is already recorded."
+                }
+            }.onFailure {
+                _snackbarMessage.value = it.localizedMessage ?: "Could not add SMS transaction."
+            }
+        }
+    }
+
+    fun deleteMoneyTransaction(txId: String) {
+        viewModelScope.launch {
+            repository.deleteMoneyTransaction(txId)
+                .onSuccess { _snackbarMessage.value = "Transaction deleted." }
+                .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Could not delete transaction." }
+        }
+    }
+
+    fun clearAllMoneyTransactions() {
+        viewModelScope.launch {
+            repository.clearAllMoneyTransactions()
+                .onSuccess { _snackbarMessage.value = "All transactions cleared." }
+                .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Could not clear transactions." }
+        }
+    }
+
+    fun updateMoneyMonthlyBudget(budget: Double) {
+        val clean = budget.coerceIn(500.0, 50_000_000.0)
+        viewModelScope.launch {
+            repository.updateProfile { it.copy(moneyMonthlyBudget = clean) }
+                .onSuccess { _snackbarMessage.value = "Monthly budget set to ${formatInr(clean)}" }
+        }
+    }
+
+    fun updateMoneyOpeningBalance(openingBalance: Double) {
+        val clean = openingBalance.coerceIn(-10_000_000.0, 100_000_000.0)
+        viewModelScope.launch {
+            repository.updateProfile { it.copy(moneyOpeningBalance = clean) }
+                .onSuccess { _snackbarMessage.value = "Opening balance updated to ${formatInr(clean)}" }
         }
     }
 

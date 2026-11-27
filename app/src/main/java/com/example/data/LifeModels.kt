@@ -1,6 +1,7 @@
 package com.example.data
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 const val DEFAULT_BLOCKED_PACKAGES_CSV =
@@ -31,6 +32,10 @@ data class UserProfile(
     val focusModeEnabled: Boolean = false,
     val globalBlockedPackagesCsv: String = DEFAULT_BLOCKED_PACKAGES_CSV,
     val focusMotivationQuote: String = DEFAULT_FOCUS_QUOTE,
+    val moneyOpeningBalance: Double = 0.0,
+    val moneyMonthlyBudget: Double = 10000.0,
+    val moneySmsTrackingEnabled: Boolean = true,
+    val moneyOnboardingSeen: Boolean = false,
     val totalNaamJapCount: Long = 0L,
     val todayNaamJapCount: Long = 0L,
     val todayMalas: Long = 0L,
@@ -41,6 +46,27 @@ data class UserProfile(
     val lastActiveDate: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "money_transactions",
+    indices = [Index(value = ["smsSignature"], unique = true)]
+)
+data class MoneyTransaction(
+    @PrimaryKey val id: String = "",
+    val userId: String = "local_user",
+    val title: String = "",
+    val amount: Double = 0.0,
+    val type: String = "EXPENSE", // "INCOME" or "EXPENSE"
+    val category: String = "Others", // "Food", "Shopping", "Bills", "Travel", "Salary", "Others"
+    val paymentMode: String = "UPI", // "UPI", "Bank", "Wallet", "Card", "Cash"
+    val source: String = "MANUAL", // "SMS" or "MANUAL"
+    val smsSender: String = "",
+    val smsBody: String = "",
+    val smsSignature: String = "",
+    val detectedBankBalance: Double? = null,
+    val timestampMs: Long = System.currentTimeMillis(),
+    val createdAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "study_time_slots")

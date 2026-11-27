@@ -57,6 +57,7 @@ import com.example.ui.screens.FocusModeScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.HubSection
 import com.example.ui.screens.LifeHubScreen
+import com.example.ui.screens.MoneyTrackerScreen
 import com.example.ui.screens.NotesScreen
 import com.example.ui.screens.ProgressScreen
 import com.example.ui.screens.QuizTimeScreen
@@ -103,7 +104,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class StudyToolOverlay {
-    NONE, AI_TUTOR, QUIZ, NOTES, TIMER
+    NONE, AI_TUTOR, QUIZ, NOTES, TIMER, MONEY_TRACKER
 }
 
 @Composable
@@ -194,6 +195,10 @@ private fun LifeOSApp(openFocusTrigger: Int) {
                     viewModel = viewModel,
                     onBack = { activeOverlay = StudyToolOverlay.NONE }
                 )
+                StudyToolOverlay.MONEY_TRACKER -> MoneyTrackerScreen(
+                    viewModel = viewModel,
+                    onExitToLifeOs = { activeOverlay = StudyToolOverlay.NONE }
+                )
                 StudyToolOverlay.NONE -> Unit
             }
         } else {
@@ -219,6 +224,7 @@ private fun LifeOSApp(openFocusTrigger: Int) {
                     when (tab) {
                         "home" -> HomeScreen(
                             viewModel = viewModel,
+                            onNavigateToMoneyTracker = { activeOverlay = StudyToolOverlay.MONEY_TRACKER },
                             onNavigateToStudy = { currentTab = "study" },
                             onNavigateToNaamJap = {
                                 hubSection = HubSection.NAAM_JAP
