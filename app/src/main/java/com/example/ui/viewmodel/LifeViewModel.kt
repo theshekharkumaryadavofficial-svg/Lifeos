@@ -3,10 +3,8 @@ package com.example.ui.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.BuildConfig
 import com.example.data.AiChatMessage
 import com.example.data.AiTutorRepository
-import com.example.data.AppUpdateConfig
 import com.example.data.LifeRepository
 import com.example.data.LifeTask
 import com.example.data.QuizQuestion
@@ -19,7 +17,6 @@ import com.example.data.UiState
 import com.example.data.UserProfile
 import com.example.data.WorkoutLog
 import com.example.data.WorkoutType
-import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
@@ -59,21 +56,15 @@ data class QuizUiState(
 
 class LifeViewModel(
     private val repository: LifeRepository,
-    private val aiRepository: AiTutorRepository,
-    private val currentUserId: String,
-    googleDisplayName: String?
+    private val aiRepository: AiTutorRepository
 ) : ViewModel() {
 
     private fun <T> Flow<T>.toSafeUiState(label: String): StateFlow<UiState<T>> =
         this.map<T, UiState<T>> { UiState.Success(it) }
             .catch { error ->
-                val firestoreError = generateSequence(error) { it.cause }
-                    .filterIsInstance<FirebaseFirestoreException>()
-                    .firstOrNull()
-                if (firestoreError == null && error is CancellationException) throw error
-                val rootError = firestoreError ?: error
-                Log.w(TAG, "Error observing $label", rootError)
-                emit(UiState.Error(rootError.message ?: "Failed to load $label"))
+                if (error is CancellationException) throw error
+                Log.w(TAG, "Error observing $label", error)
+                emit(UiState.Error(error.message ?: "Failed to load $label"))
             }
             .stateIn(
                 scope = viewModelScope,
@@ -82,55 +73,27 @@ class LifeViewModel(
             )
 
     val profileState: StateFlow<UiState<UserProfile?>> =
-        repository.observeProfile(currentUserId).toSafeUiState("profile")
+        repository.observeProfile().toSafeUiState("profile")
 
     val tasksState: StateFlow<UiState<List<LifeTask>>> =
-        repository.observeTasks(currentUserId).toSafeUiState("tasks")
+        repository.observeTasks().toSafeUiState("tasks")
 
     val subjectsState: StateFlow<UiState<List<StudySubject>>> =
-        repository.observeSubjects(currentUserId).toSafeUiState("subjects")
+        repository.observeSubjects().toSafeUiState("subjects")
 
     val notesState: StateFlow<UiState<List<StudyNote>>> =
-        repository.observeNotes(currentUserId).toSafeUiState("notes")
+        repository.observeNotes().toSafeUiState("notes")
 
     val workoutsState: StateFlow<UiState<List<WorkoutLog>>> =
-        repository.observeWorkouts(currentUserId).toSafeUiState("workouts")
+        repository.observeWorkouts().toSafeUiState("workouts")
 
     val sadhanaLogsState: StateFlow<UiState<List<SadhanaLog>>> =
-        repository.observeSadhanaLogs(currentUserId).toSafeUiState("sadhana logs")
-
-    val appUpdateConfig: StateFlow<AppUpdateConfig?> =
-        repository.observeAppUpdateConfig(currentUserId)
-            .catch { error ->
-                val firestoreError = generateSequence(error) { it.cause }
-                    .filterIsInstance<FirebaseFirestoreException>()
-                    .firstOrNull()
-                if (firestoreError == null && error is CancellationException) throw error
-                Log.w(TAG, "Error observing app update config", firestoreError ?: error)
-                emit(null)
-            }
-            .stateIn(
-                scope = viewModelScope,
-                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
-                initialValue = null
-            )
-
-    private val _checkingForUpdate = MutableStateFlow(false)
-    val checkingForUpdate: StateFlow<Boolean> = _checkingForUpdate.asStateFlow()
-
-    private val _publishingUpdate = MutableStateFlow(false)
-    val publishingUpdate: StateFlow<Boolean> = _publishingUpdate.asStateFlow()
-
-    private val _updatePromptDismissed = MutableStateFlow(false)
-    val updatePromptDismissed: StateFlow<Boolean> = _updatePromptDismissed.asStateFlow()
-
-    private val _lastUpdateStatus = MutableStateFlow<String?>(null)
-    val lastUpdateStatus: StateFlow<String?> = _lastUpdateStatus.asStateFlow()
+        repository.observeSadhanaLogs().toSafeUiState("sadhana logs")
 
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
 
-    // Live Naam Jap session bead counter (syncs smoothly to Firestore)
+    // Live Naam Jap session bead counter
     private val _sessionJapCount = MutableStateFlow(0)
     val sessionJapCount: StateFlow<Int> = _sessionJapCount.asStateFlow()
 
@@ -167,9 +130,8 @@ class LifeViewModel(
 
     init {
         viewModelScope.launch {
-            val res = repository.ensureUserProfile(currentUserId, googleDisplayName)
-            res.onFailure {
-                _snackbarMessage.value = it.localizedMessage ?: "Could not sync profile."
+            repository.ensureUserProfile().onFailure {
+                _snackbarMessage.value = it.localizedMessage ?: "Could not initialize local profile."
             }
         }
     }
@@ -179,7 +141,7 @@ class LifeViewModel(
     }
 
     private fun currentProfileOrDefault(): UserProfile =
-        (profileState.value as? UiState.Success)?.data ?: UserProfile(userId = currentUserId)
+        (profileState.value as? UiState.Success)?.data ?: UserProfile()
 
     // --- PROFILE ACTIONS ---
 
@@ -187,7 +149,7 @@ class LifeViewModel(
         val clean = newGoal.trim().take(120)
         if (clean.isEmpty()) return
         viewModelScope.launch {
-            repository.updateProfileFields(currentUserId, mapOf("dailyGoalText" to clean))
+            repository.updateProfile { it.copy(dailyGoalText = clean) }
                 .onSuccess { _snackbarMessage.value = "Daily goal updated!" }
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Failed to update goal." }
         }
@@ -198,34 +160,31 @@ class LifeViewModel(
         val cleanTag = tagline.trim().take(100)
         if (cleanName.isEmpty()) return
         viewModelScope.launch {
-            repository.updateProfileFields(
-                currentUserId,
-                mapOf("displayName" to cleanName, "tagline" to cleanTag)
-            ).onSuccess { _snackbarMessage.value = "Profile saved!" }
+            repository.updateProfile { it.copy(displayName = cleanName, tagline = cleanTag) }
+                .onSuccess { _snackbarMessage.value = "Profile saved!" }
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Failed to save profile." }
         }
     }
 
     fun setMotivationMode(enabled: Boolean) {
         viewModelScope.launch {
-            repository.updateProfileFields(currentUserId, mapOf("motivationMode" to enabled))
+            repository.updateProfile { it.copy(motivationMode = enabled) }
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Failed to update setting." }
         }
     }
 
     fun adjustWaterGlasses(delta: Int) {
-        val profile = currentProfileOrDefault()
-        val updated = (profile.todayWaterGlasses + delta).coerceIn(0L, 50L)
         viewModelScope.launch {
-            repository.updateProfileFields(currentUserId, mapOf("todayWaterGlasses" to updated))
-                .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Could not update water." }
+            repository.updateProfile { current ->
+                current.copy(todayWaterGlasses = (current.todayWaterGlasses + delta).coerceIn(0L, 50L))
+            }.onFailure { _snackbarMessage.value = it.localizedMessage ?: "Could not update water." }
         }
     }
 
     fun updateSleepHours(hours: Double) {
         val bounded = hours.coerceIn(0.0, 24.0)
         viewModelScope.launch {
-            repository.updateProfileFields(currentUserId, mapOf("todaySleepHours" to bounded))
+            repository.updateProfile { it.copy(todaySleepHours = bounded) }
                 .onSuccess { _snackbarMessage.value = "Sleep logged: ${"%.1f".format(bounded)} hrs" }
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Could not update sleep." }
         }
@@ -235,8 +194,17 @@ class LifeViewModel(
         val clean = mantra.trim().take(60)
         if (clean.isEmpty()) return
         viewModelScope.launch {
-            repository.updateProfileFields(currentUserId, mapOf("activeMantra" to clean))
+            repository.updateProfile { it.copy(activeMantra = clean) }
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Could not switch mantra." }
+        }
+    }
+
+    fun resetTodayCounters() {
+        viewModelScope.launch {
+            _sessionJapCount.value = 0
+            repository.resetTodayCounters()
+                .onSuccess { _snackbarMessage.value = "Today's Naam Jap & Water counters reset." }
+                .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Could not reset counters." }
         }
     }
 
@@ -260,31 +228,29 @@ class LifeViewModel(
         }
         val profile = currentProfileOrDefault()
         val malasEarned = count / 108L
-        val newTodayCount = (profile.todayNaamJapCount + count).coerceAtMost(1_000_000L)
-        val newTotalCount = (profile.totalNaamJapCount + count).coerceAtMost(100_000_000L)
-        val newTodayMalas = (newTodayCount / 108L).coerceAtMost(10_000L)
         val earnedXp = (count / 10L).coerceAtLeast(10L)
-        val newXp = (profile.xp + earnedXp).coerceAtMost(10_000_000L)
-        val newLevel = (1L + newXp / 250L).coerceIn(1L, 999L)
 
         viewModelScope.launch {
             val logRes = repository.logSadhanaSession(
-                userId = currentUserId,
                 mantra = profile.activeMantra,
                 count = count,
                 malas = malasEarned,
                 meditationMinutes = meditationMinutes
             )
-            val profRes = repository.updateProfileFields(
-                currentUserId,
-                mapOf(
-                    "todayNaamJapCount" to newTodayCount,
-                    "totalNaamJapCount" to newTotalCount,
-                    "todayMalas" to newTodayMalas,
-                    "xp" to newXp,
-                    "level" to newLevel
+            val profRes = repository.updateProfile { current ->
+                val newTodayCount = (current.todayNaamJapCount + count).coerceAtMost(1_000_000L)
+                val newTotalCount = (current.totalNaamJapCount + count).coerceAtMost(100_000_000L)
+                val newTodayMalas = (newTodayCount / 108L).coerceAtMost(10_000L)
+                val newXp = (current.xp + earnedXp).coerceAtMost(10_000_000L)
+                val newLevel = (1L + newXp / 250L).coerceIn(1L, 999L)
+                current.copy(
+                    todayNaamJapCount = newTodayCount,
+                    totalNaamJapCount = newTotalCount,
+                    todayMalas = newTodayMalas,
+                    xp = newXp,
+                    level = newLevel
                 )
-            )
+            }
             if (logRes.isSuccess && profRes.isSuccess) {
                 _sessionJapCount.value = 0
                 _snackbarMessage.value = "Saved $count ${profile.activeMantra} beads (+$earnedXp XP)"
@@ -298,7 +264,7 @@ class LifeViewModel(
 
     fun addTask(title: String, category: TaskCategory, priority: String, dueDate: String) {
         viewModelScope.launch {
-            repository.addTask(currentUserId, title, category, priority, dueDate)
+            repository.addTask(title, category, priority, dueDate)
                 .onSuccess { _snackbarMessage.value = "Task added to your plan!" }
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Failed to add task." }
         }
@@ -307,10 +273,10 @@ class LifeViewModel(
     fun toggleTask(task: LifeTask) {
         val nextCompleted = !task.completed
         viewModelScope.launch {
-            repository.toggleTaskCompleted(currentUserId, task.id, nextCompleted)
+            repository.toggleTaskCompleted(task.id, nextCompleted)
                 .onSuccess {
                     if (nextCompleted) {
-                        repository.awardXpAndStudyMinutes(currentUserId, currentProfileOrDefault(), 20L)
+                        repository.awardXpAndStudyMinutes(20L)
                     }
                 }
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Failed to update task." }
@@ -319,7 +285,7 @@ class LifeViewModel(
 
     fun deleteTask(taskId: String) {
         viewModelScope.launch {
-            repository.deleteTask(currentUserId, taskId)
+            repository.deleteTask(taskId)
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Failed to delete task." }
         }
     }
@@ -328,7 +294,7 @@ class LifeViewModel(
 
     fun addSubject(name: String, progress: Long, accent: SubjectAccent) {
         viewModelScope.launch {
-            repository.addSubject(currentUserId, name, progress, accent)
+            repository.addSubject(name, progress, accent)
                 .onSuccess { _snackbarMessage.value = "Subject added!" }
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Failed to add subject." }
         }
@@ -337,7 +303,6 @@ class LifeViewModel(
     fun updateSubjectProgress(subject: StudySubject, newProgress: Long) {
         viewModelScope.launch {
             repository.updateSubjectProgress(
-                currentUserId,
                 subject.id,
                 newProgress,
                 subject.studyMinutes
@@ -349,14 +314,14 @@ class LifeViewModel(
 
     fun deleteSubject(subjectId: String) {
         viewModelScope.launch {
-            repository.deleteSubject(currentUserId, subjectId)
+            repository.deleteSubject(subjectId)
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Failed to delete subject." }
         }
     }
 
     fun addNote(title: String, subjectName: String, content: String) {
         viewModelScope.launch {
-            repository.addNote(currentUserId, title, subjectName, content)
+            repository.addNote(title, subjectName, content)
                 .onSuccess { _snackbarMessage.value = "Study note saved!" }
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Failed to save note." }
         }
@@ -364,7 +329,7 @@ class LifeViewModel(
 
     fun deleteNote(noteId: String) {
         viewModelScope.launch {
-            repository.deleteNote(currentUserId, noteId)
+            repository.deleteNote(noteId)
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Failed to delete note." }
         }
     }
@@ -380,7 +345,6 @@ class LifeViewModel(
     ) {
         viewModelScope.launch {
             repository.addWorkout(
-                currentUserId,
                 title,
                 type,
                 durationMinutes,
@@ -388,7 +352,7 @@ class LifeViewModel(
                 caloriesBurned
             ).onSuccess {
                 val xpGain = (durationMinutes * 2L).coerceIn(15L, 200L)
-                repository.awardXpAndStudyMinutes(currentUserId, currentProfileOrDefault(), xpGain)
+                repository.awardXpAndStudyMinutes(xpGain)
                 _snackbarMessage.value = "Workout logged! +$xpGain XP"
             }.onFailure {
                 _snackbarMessage.value = it.localizedMessage ?: "Failed to log workout."
@@ -398,7 +362,7 @@ class LifeViewModel(
 
     fun deleteWorkout(workoutId: String) {
         viewModelScope.launch {
-            repository.deleteWorkout(currentUserId, workoutId)
+            repository.deleteWorkout(workoutId)
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Failed to delete workout." }
         }
     }
@@ -456,15 +420,12 @@ class LifeViewModel(
 
         viewModelScope.launch {
             repository.awardXpAndStudyMinutes(
-                currentUserId,
-                currentProfileOrDefault(),
                 addedXp = xpGain,
                 addedStudyMinutes = mins
             )
             if (matchedSubject != null) {
                 val boostedProgress = (matchedSubject.progressPercent + 3L).coerceAtMost(100L)
                 repository.updateSubjectProgress(
-                    currentUserId,
                     matchedSubject.id,
                     boostedProgress,
                     matchedSubject.studyMinutes + mins
@@ -568,7 +529,7 @@ class LifeViewModel(
             _quizState.value = state.copy(finished = true)
             val xp = (state.score * 15L).coerceAtLeast(10L)
             viewModelScope.launch {
-                repository.awardXpAndStudyMinutes(currentUserId, currentProfileOrDefault(), xp)
+                repository.awardXpAndStudyMinutes(xp)
             }
         } else {
             _quizState.value = state.copy(currentIndex = nextIdx, selectedOption = null)
@@ -605,83 +566,6 @@ class LifeViewModel(
                 _progressInsight.value = UiState.Error(
                     e.localizedMessage ?: "Could not analyze progress right now."
                 )
-            }
-        }
-    }
-
-    // --- FIREBASE IN-APP UPDATE ---
-
-    fun hasNewerUpdate(config: AppUpdateConfig?): Boolean =
-        config != null && config.latestVersionCode > BuildConfig.VERSION_CODE
-
-    fun dismissUpdatePrompt() {
-        _updatePromptDismissed.value = true
-    }
-
-    fun checkForAppUpdate() {
-        if (_checkingForUpdate.value) return
-        _checkingForUpdate.value = true
-        viewModelScope.launch {
-            try {
-                repository.fetchAppUpdateConfig(currentUserId)
-                    .onSuccess { config ->
-                        when {
-                            config == null -> {
-                                val msg = "You are on LifeOS v${BuildConfig.VERSION_NAME} (Latest)."
-                                _lastUpdateStatus.value = msg
-                                _snackbarMessage.value = msg
-                            }
-                            config.latestVersionCode > BuildConfig.VERSION_CODE -> {
-                                _updatePromptDismissed.value = false
-                                val msg = "New update v${config.latestVersionName} available on Firebase!"
-                                _lastUpdateStatus.value = msg
-                                _snackbarMessage.value = msg
-                            }
-                            else -> {
-                                val msg = "LifeOS v${BuildConfig.VERSION_NAME} is up to date!"
-                                _lastUpdateStatus.value = msg
-                                _snackbarMessage.value = msg
-                            }
-                        }
-                    }
-                    .onFailure { err ->
-                        val msg = err.localizedMessage ?: "Could not check Firebase updates right now."
-                        _lastUpdateStatus.value = msg
-                        _snackbarMessage.value = msg
-                    }
-            } finally {
-                _checkingForUpdate.value = false
-            }
-        }
-    }
-
-    fun publishAppUpdate(
-        versionCode: Long,
-        versionName: String,
-        releaseNotes: String,
-        downloadUrl: String,
-        forceUpdate: Boolean,
-        onSuccess: () -> Unit = {}
-    ) {
-        if (_publishingUpdate.value) return
-        _publishingUpdate.value = true
-        viewModelScope.launch {
-            try {
-                repository.publishAppUpdateConfig(
-                    userId = currentUserId,
-                    latestVersionCode = versionCode,
-                    latestVersionName = versionName,
-                    releaseNotes = releaseNotes,
-                    downloadUrl = downloadUrl,
-                    forceUpdate = forceUpdate
-                ).onSuccess {
-                    _snackbarMessage.value = "Published LifeOS v${versionName.trim()} update to Firebase!"
-                    onSuccess()
-                }.onFailure { err ->
-                    _snackbarMessage.value = err.localizedMessage ?: "Failed to publish update config."
-                }
-            } finally {
-                _publishingUpdate.value = false
             }
         }
     }

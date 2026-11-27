@@ -41,13 +41,18 @@ jobs:
         run: |
           if [ -f debug.keystore.base64 ]; then
             base64 -d debug.keystore.base64 > debug.keystore
+            echo "### Signing Keystore: Live (from repo debug.keystore.base64)" >> "$GITHUB_STEP_SUMMARY"
           elif [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
             echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > debug.keystore
+            echo "### Signing Keystore: Live (from DEBUG_KEYSTORE_BASE64 secret)" >> "$GITHUB_STEP_SUMMARY"
           elif [ ! -f debug.keystore ]; then
             keytool -genkeypair -v -keystore debug.keystore \
               -storepass android -alias androiddebugkey -keypass android \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
+            echo "::warning::debug.keystore.base64 not found in repo or DEBUG_KEYSTORE_BASE64 secret. Generated a temporary keystore; Google Sign-In will fail due to SHA-1 mismatch."
+            echo "### WARNING: Temporary Random Keystore Used (Google Sign-In will reject SHA-1)" >> "$GITHUB_STEP_SUMMARY"
+            echo "Add \`DEBUG_KEYSTORE_BASE64\` in **GitHub Repo Settings (top tab) -> Secrets and variables -> Actions** and re-run." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Prepare google-services.json

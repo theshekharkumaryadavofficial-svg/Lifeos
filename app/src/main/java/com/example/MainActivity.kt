@@ -11,13 +11,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Home
@@ -28,43 +22,27 @@ import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Work
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color as ComposeColor
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.credentials.CredentialManager
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.data.AiTutorRepository
+import com.example.data.LifeDatabase
 import com.example.data.LifeRepository
 import com.example.firebase.configureAppCheck
-import com.example.firebase.performSignOut
 import com.example.ui.components.BottomNavDestination
 import com.example.ui.components.LifeBottomBar
 import com.example.ui.screens.AiTutorScreen
@@ -78,23 +56,15 @@ import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SplashAndAuthScreen
 import com.example.ui.screens.StudyScreen
 import com.example.ui.screens.StudyTimerScreen
-import com.example.ui.screens.openSafeHttpsDownloadUrl
-import com.example.ui.theme.BrightGold
 import com.example.ui.theme.LifeOSTheme
 import com.example.ui.theme.ObsidianBg
-import com.example.ui.theme.TextOnDark
-import com.example.ui.theme.TextOnDarkMuted
 import com.example.ui.viewmodel.LifeViewModel
-import com.google.firebase.Firebase
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.auth
-import com.google.firebase.firestore.FirebaseFirestore
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // STEP 1: Configure Firebase App Check with launch intent BEFORE UI or ViewModels
+        // Configure Firebase App Check for Firebase AI Logic (AI Tutor & Quiz)
         configureAppCheck(this, intent)
 
         enableEdgeToEdge(
@@ -116,64 +86,29 @@ private enum class StudyToolOverlay {
 
 @Composable
 private fun LifeOSRoot() {
-    var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
     var splashDismissed by rememberSaveable { mutableStateOf(false) }
 
-    DisposableEffect(Unit) {
-        val listener = FirebaseAuth.AuthStateListener { auth ->
-            currentUser = auth.currentUser
-        }
-        Firebase.auth.addAuthStateListener(listener)
-        onDispose { Firebase.auth.removeAuthStateListener(listener) }
-    }
-
-    val user = currentUser
-    if (user == null || !splashDismissed) {
+    if (!splashDismissed) {
         SplashAndAuthScreen(
-            isAuthenticated = user != null,
-            onSplashComplete = { splashDismissed = true },
-            onAuthSuccess = {
-                currentUser = Firebase.auth.currentUser
-                splashDismissed = true
-            }
+            onSplashComplete = { splashDismissed = true }
         )
     } else {
-        key(user.uid) {
-            AuthenticatedLifeOSApp(
-                currentUserId = user.uid,
-                googleDisplayName = user.displayName,
-                userEmail = user.email,
-                photoUrl = user.photoUrl?.toString()
-            )
-        }
+        LifeOSApp()
     }
 }
 
 @Composable
-private fun AuthenticatedLifeOSApp(
-    currentUserId: String,
-    googleDisplayName: String?,
-    userEmail: String?,
-    photoUrl: String?
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val credentialManager = remember(context) { CredentialManager.create(context) }
-
+private fun LifeOSApp() {
     val viewModel: LifeViewModel = viewModel(
-        key = currentUserId,
         factory = viewModelFactory {
             initializer {
                 val app = checkNotNull(this[APPLICATION_KEY]) {
                     "APPLICATION_KEY missing from CreationExtras"
                 }
-                val databaseId = app.getString(R.string.firestore_database_id)
-                val db = FirebaseFirestore.getInstance(databaseId)
+                val db = LifeDatabase.getInstance(app)
                 LifeViewModel(
-                    repository = LifeRepository(db),
-                    aiRepository = AiTutorRepository(),
-                    currentUserId = currentUserId,
-                    googleDisplayName = googleDisplayName
+                    repository = LifeRepository(db.lifeDao()),
+                    aiRepository = AiTutorRepository()
                 )
             }
         }
@@ -181,8 +116,6 @@ private fun AuthenticatedLifeOSApp(
 
     val snackbarHostState = remember { SnackbarHostState() }
     val snackbarMessage by viewModel.snackbarMessage.collectAsStateWithLifecycle()
-    val appUpdateConfig by viewModel.appUpdateConfig.collectAsStateWithLifecycle()
-    val updatePromptDismissed by viewModel.updatePromptDismissed.collectAsStateWithLifecycle()
 
     LaunchedEffect(snackbarMessage) {
         snackbarMessage?.let { msg ->
@@ -292,94 +225,9 @@ private fun AuthenticatedLifeOSApp(
 
                 "settings" -> SettingsScreen(
                     viewModel = viewModel,
-                    userEmail = userEmail,
-                    photoUrl = photoUrl,
-                    onLogout = {
-                        performSignOut(
-                            credentialManager = credentialManager,
-                            scope = scope
-                        )
-                    },
                     contentPadding = innerPadding
                 )
             }
         }
-    }
-
-    val pendingUpdate = appUpdateConfig
-    if (pendingUpdate != null && viewModel.hasNewerUpdate(pendingUpdate) && !updatePromptDismissed) {
-        AlertDialog(
-            onDismissRequest = {
-                if (!pendingUpdate.forceUpdate) {
-                    viewModel.dismissUpdatePrompt()
-                }
-            },
-            containerColor = ComposeColor(0xFF1A1829),
-            titleContentColor = TextOnDark,
-            textContentColor = TextOnDarkMuted,
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Rounded.SystemUpdate,
-                        contentDescription = "Update Available",
-                        tint = BrightGold,
-                        modifier = Modifier.size(26.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = if (pendingUpdate.forceUpdate) {
-                            "Important Update v${pendingUpdate.latestVersionName}"
-                        } else {
-                            "LifeOS v${pendingUpdate.latestVersionName} Available"
-                        },
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = pendingUpdate.releaseNotes.ifBlank {
-                            "A newer version of LifeOS is ready with fresh improvements."
-                        },
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            color = TextOnDark,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    )
-                }
-            },
-            confirmButton = {
-                if (pendingUpdate.downloadUrl.isNotBlank()) {
-                    TextButton(
-                        onClick = {
-                            openSafeHttpsDownloadUrl(context, pendingUpdate.downloadUrl)
-                            if (!pendingUpdate.forceUpdate) {
-                                viewModel.dismissUpdatePrompt()
-                            }
-                        },
-                        modifier = Modifier.testTag("auto_update_download_button")
-                    ) {
-                        Text("Update Now", color = BrightGold, fontWeight = FontWeight.ExtraBold)
-                    }
-                } else {
-                    TextButton(onClick = { viewModel.dismissUpdatePrompt() }) {
-                        Text("OK", color = BrightGold, fontWeight = FontWeight.ExtraBold)
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { viewModel.dismissUpdatePrompt() },
-                    modifier = Modifier.testTag("auto_update_later_button")
-                ) {
-                    Text(
-                        text = if (pendingUpdate.forceUpdate) "Close" else "Later",
-                        color = TextOnDarkMuted,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        )
     }
 }
