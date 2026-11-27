@@ -33,6 +33,11 @@ class LifeRepository(private val dao: LifeDao) {
                     xp = 0L,
                     streakDays = 1L,
                     totalStudyMinutes = 0L,
+                    todayStudyMinutes = 0L,
+                    dailyStudyTargetMinutes = 480L,
+                    focusModeEnabled = false,
+                    globalBlockedPackagesCsv = DEFAULT_BLOCKED_PACKAGES_CSV,
+                    focusMotivationQuote = DEFAULT_FOCUS_QUOTE,
                     totalNaamJapCount = 0L,
                     todayNaamJapCount = 0L,
                     todayMalas = 0L,
@@ -49,6 +54,7 @@ class LifeRepository(private val dao: LifeDao) {
             dao.upsertProfile(
                 existing.copy(
                     streakDays = (existing.streakDays + 1L).coerceAtMost(10_000L),
+                    todayStudyMinutes = 0L,
                     todayNaamJapCount = 0L,
                     todayMalas = 0L,
                     todayWaterGlasses = 0L,
@@ -78,19 +84,54 @@ class LifeRepository(private val dao: LifeDao) {
         val newXp = (current.xp + addedXp).coerceIn(0L, 10_000_000L)
         val newLevel = (1L + (newXp / 250L)).coerceIn(1L, 999L)
         val newStudy = (current.totalStudyMinutes + addedStudyMinutes).coerceIn(0L, 10_000_000L)
+        val newTodayStudy = (current.todayStudyMinutes + addedStudyMinutes).coerceIn(0L, 1_440L)
         current.copy(
             xp = newXp,
             level = newLevel,
-            totalStudyMinutes = newStudy
+            totalStudyMinutes = newStudy,
+            todayStudyMinutes = newTodayStudy
         )
     }
 
     suspend fun resetTodayCounters(): Result<Unit> = updateProfile { current ->
         current.copy(
+            todayStudyMinutes = 0L,
             todayNaamJapCount = 0L,
             todayMalas = 0L,
             todayWaterGlasses = 0L
         )
+    }
+
+    // --- STUDY TIME SLOTS ---
+
+    fun observeTimeSlots(): Flow<List<StudyTimeSlot>> = dao.observeTimeSlots()
+
+    suspend fun getTimeSlotsOnce(): List<StudyTimeSlot> = dao.getTimeSlotsOnce()
+
+    suspend fun upsertTimeSlot(slot: StudyTimeSlot): Result<Unit> = runSafe {
+        val cleanTitle = slot.title.trim().take(60).ifEmpty { "Study Session" }
+        val cleanQuote = slot.motivationalQuote.trim().take(180).ifEmpty { DEFAULT_FOCUS_QUOTE }
+        val now = System.currentTimeMillis()
+        val finalId = slot.id.ifBlank { UUID.randomUUID().toString() }
+        dao.upsertTimeSlot(
+            slot.copy(
+                id = finalId,
+                userId = "local_user",
+                title = cleanTitle,
+                startHour = slot.startHour.coerceIn(0, 23),
+                startMinute = slot.startMinute.coerceIn(0, 59),
+                endHour = slot.endHour.coerceIn(0, 23),
+                endMinute = slot.endMinute.coerceIn(0, 59),
+                motivationalQuote = cleanQuote,
+                createdAt = if (slot.id.isBlank()) now else slot.createdAt,
+                updatedAt = now
+            )
+        )
+    }
+
+    suspend fun deleteTimeSlot(slotId: String): Result<Unit> = runSafe {
+        require(slotId.isNotBlank())
+        dao.deleteTimeSlot(slotId)
     }
 
     // --- TASKS ---

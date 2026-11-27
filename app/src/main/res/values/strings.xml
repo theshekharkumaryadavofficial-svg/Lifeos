@@ -1,3 +1,18 @@
 <resources>
     <string name="app_name">LifeOS</string>
+    <string name="study_center_title">Study Center</string>
+    <string name="focus_mode_badge">STUDY MODE</string>
+    <string name="focus_mode_title">Focus Mode</string>
+    <string name="focus_mode_subtitle">Block Distractions • Study Deep • Build Your Future</string>
+    <string name="time_slot_setup_title">Time Slot Setup</string>
+    <string name="time_slot_setup_subtitle">Set your study time and block distracting apps</string>
+    <string name="add_time_slot_cta">+ Add Time Slot</string>
+    <string name="app_blocking_title">App Blocking</string>
+    <string name="app_blocking_subtitle">Select apps to block during study time</string>
+    <string name="manage_apps_cta">Manage Apps</string>
+    <string name="daily_study_tracker_title">Daily Study Tracker</string>
+    <string name="daily_study_tracker_subtitle">Your progress today</string>
+    <string name="focus_shield_notification_channel">LifeOS Focus Shield</string>
+    <string name="focus_shield_notification_title">Focus Mode Shield Active</string>
+    <string name="focus_blocker_return_cta">Return to Study</string>
 </resources>

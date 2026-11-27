@@ -1,22 +1,31 @@
 package com.example.ui.viewmodel
 
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AiChatMessage
 import com.example.data.AiTutorRepository
+import com.example.data.DEFAULT_FOCUS_QUOTE
 import com.example.data.LifeRepository
 import com.example.data.LifeTask
 import com.example.data.QuizQuestion
 import com.example.data.SadhanaLog
 import com.example.data.StudyNote
 import com.example.data.StudySubject
+import com.example.data.StudyTimeSlot
 import com.example.data.SubjectAccent
 import com.example.data.TaskCategory
 import com.example.data.UiState
 import com.example.data.UserProfile
 import com.example.data.WorkoutLog
 import com.example.data.WorkoutType
+import com.example.focus.FocusPrefsBridge
+import com.example.focus.STUDY_MOTIVATIONAL_QUOTES
+import com.example.focus.isTimeSlotActiveNow
+import com.example.focus.parsePackageCsv
+import com.example.focus.remainingSecondsInSlot
+import com.example.focus.toPackageCsv
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
@@ -27,20 +36,42 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.UUID
 
 private const val TAG = "LifeViewModel"
 private const val STOP_TIMEOUT_MS = 5000L
+private const val POMODORO_FOCUS_SECONDS = 25 * 60
+private const val POMODORO_BREAK_SECONDS = 5 * 60
 
 data class FocusTimerState(
     val totalSeconds: Int = 25 * 60,
     val remainingSeconds: Int = 25 * 60,
     val running: Boolean = false,
     val selectedSubjectId: String? = null
+)
+
+data class LiveFocusSessionState(
+    val isOverlayOpen: Boolean = false,
+    val isActive: Boolean = false,
+    val isManualFocus: Boolean = false,
+    val activeSlotId: String? = null,
+    val activeSlotTitle: String = "Deep Focus Session",
+    val pomodoroEnabled: Boolean = true,
+    val countdownEnabled: Boolean = true,
+    val pomodoroIsBreak: Boolean = false,
+    val pomodoroRemainingSeconds: Int = POMODORO_FOCUS_SECONDS,
+    val pomodoroRunning: Boolean = false,
+    val slotRemainingSeconds: Int = 0,
+    val elapsedFocusSeconds: Int = 0,
+    val completedPomodoros: Int = 0,
+    val blockedPackages: List<String> = emptyList(),
+    val motivationalQuote: String = DEFAULT_FOCUS_QUOTE
 )
 
 data class QuizUiState(
@@ -55,6 +86,7 @@ data class QuizUiState(
 )
 
 class LifeViewModel(
+    private val appContext: Context,
     private val repository: LifeRepository,
     private val aiRepository: AiTutorRepository
 ) : ViewModel() {
@@ -74,6 +106,9 @@ class LifeViewModel(
 
     val profileState: StateFlow<UiState<UserProfile?>> =
         repository.observeProfile().toSafeUiState("profile")
+
+    val timeSlotsState: StateFlow<UiState<List<StudyTimeSlot>>> =
+        repository.observeTimeSlots().toSafeUiState("time slots")
 
     val tasksState: StateFlow<UiState<List<LifeTask>>> =
         repository.observeTasks().toSafeUiState("tasks")
@@ -97,10 +132,16 @@ class LifeViewModel(
     private val _sessionJapCount = MutableStateFlow(0)
     val sessionJapCount: StateFlow<Int> = _sessionJapCount.asStateFlow()
 
-    // Study Pomodoro Focus Timer
+    // Classic Study Timer screen state
     private val _focusTimer = MutableStateFlow(FocusTimerState())
     val focusTimer: StateFlow<FocusTimerState> = _focusTimer.asStateFlow()
     private var timerJob: Job? = null
+
+    // Live Focus Mode + Time Slot Shield state
+    private val _liveFocusSession = MutableStateFlow(LiveFocusSessionState())
+    val liveFocusSession: StateFlow<LiveFocusSessionState> = _liveFocusSession.asStateFlow()
+    private var focusEngineJob: Job? = null
+    private val autoOpenedSlotIds = hashSetOf<String>()
 
     // AI Tutor streaming chat state
     private val _chatMessages = MutableStateFlow(
@@ -134,6 +175,138 @@ class LifeViewModel(
                 _snackbarMessage.value = it.localizedMessage ?: "Could not initialize local profile."
             }
         }
+        observeFocusRulesForServiceSync()
+        startLiveFocusEngineLoop()
+    }
+
+    private fun observeFocusRulesForServiceSync() {
+        viewModelScope.launch {
+            combine(
+                repository.observeProfile(),
+                repository.observeTimeSlots()
+            ) { profile, slots ->
+                Pair(profile ?: UserProfile(), slots)
+            }.collect { (profile, slots) ->
+                FocusPrefsBridge.saveSnapshot(
+                    context = appContext,
+                    manualFocusOn = profile.focusModeEnabled,
+                    globalBlockedCsv = profile.globalBlockedPackagesCsv,
+                    motivationalQuote = profile.focusMotivationQuote,
+                    slots = slots
+                )
+            }
+        }
+    }
+
+    private fun startLiveFocusEngineLoop() {
+        focusEngineJob?.cancel()
+        focusEngineJob = viewModelScope.launch {
+            while (isActive) {
+                val now = System.currentTimeMillis()
+                val profile = currentProfileOrDefault()
+                val slots = (timeSlotsState.value as? UiState.Success)?.data.orEmpty()
+                val activeSlot = slots.firstOrNull { isTimeSlotActiveNow(it, now) }
+                val shouldBeActive = profile.focusModeEnabled || activeSlot != null
+
+                if (shouldBeActive) {
+                    val combinedBlocked = buildList {
+                        if (profile.focusModeEnabled) {
+                            addAll(parsePackageCsv(profile.globalBlockedPackagesCsv))
+                        }
+                        if (activeSlot != null) {
+                            val slotPkgs = parsePackageCsv(activeSlot.blockedPackagesCsv)
+                            if (slotPkgs.isNotEmpty()) {
+                                addAll(slotPkgs)
+                            } else {
+                                addAll(parsePackageCsv(profile.globalBlockedPackagesCsv))
+                            }
+                        }
+                    }.distinct()
+
+                    val slotRemaining = activeSlot?.let { remainingSecondsInSlot(it, now) } ?: 0
+                    val quote = activeSlot?.motivationalQuote?.takeIf { it.isNotBlank() }
+                        ?: profile.focusMotivationQuote.ifBlank { DEFAULT_FOCUS_QUOTE }
+
+                    val wasSlotJustTriggered = activeSlot != null && autoOpenedSlotIds.add(activeSlot.id)
+                    var pomodoroJustCompleted = false
+
+                    _liveFocusSession.update { current ->
+                        val enteringFresh = !current.isActive
+                        val usePomodoro = activeSlot?.pomodoroEnabled ?: true
+                        val useCountdown = activeSlot?.countdownEnabled ?: (activeSlot != null)
+                        val runningNow = if (enteringFresh || wasSlotJustTriggered) {
+                            usePomodoro
+                        } else {
+                            current.pomodoroRunning && usePomodoro
+                        }
+
+                        var nextPomoSec = if (enteringFresh || wasSlotJustTriggered) {
+                            POMODORO_FOCUS_SECONDS
+                        } else {
+                            current.pomodoroRemainingSeconds
+                        }
+                        var nextIsBreak = if (enteringFresh || wasSlotJustTriggered) {
+                            false
+                        } else {
+                            current.pomodoroIsBreak
+                        }
+                        var nextCompletedPomos = current.completedPomodoros
+
+                        if (runningNow && !enteringFresh) {
+                            if (nextPomoSec > 1) {
+                                nextPomoSec -= 1
+                            } else {
+                                if (!nextIsBreak) {
+                                    nextCompletedPomos += 1
+                                    pomodoroJustCompleted = true
+                                }
+                                nextIsBreak = !nextIsBreak
+                                nextPomoSec = if (nextIsBreak) POMODORO_BREAK_SECONDS else POMODORO_FOCUS_SECONDS
+                            }
+                        }
+
+                        current.copy(
+                            isOverlayOpen = current.isOverlayOpen || wasSlotJustTriggered,
+                            isActive = true,
+                            isManualFocus = profile.focusModeEnabled,
+                            activeSlotId = activeSlot?.id,
+                            activeSlotTitle = activeSlot?.title ?: "Deep Focus Mode",
+                            pomodoroEnabled = usePomodoro,
+                            countdownEnabled = useCountdown,
+                            pomodoroIsBreak = nextIsBreak,
+                            pomodoroRemainingSeconds = nextPomoSec,
+                            pomodoroRunning = runningNow,
+                            slotRemainingSeconds = slotRemaining,
+                            elapsedFocusSeconds = if (enteringFresh) 0 else current.elapsedFocusSeconds + 1,
+                            completedPomodoros = nextCompletedPomos,
+                            blockedPackages = combinedBlocked,
+                            motivationalQuote = quote
+                        )
+                    }
+
+                    if (pomodoroJustCompleted) {
+                        repository.awardXpAndStudyMinutes(addedXp = 50L, addedStudyMinutes = 25L)
+                        _snackbarMessage.value = "Pomodoro complete! +25 mins & +50 XP logged."
+                    }
+                } else {
+                    autoOpenedSlotIds.clear()
+                    if (_liveFocusSession.value.isActive) {
+                        val elapsedMins = (_liveFocusSession.value.elapsedFocusSeconds / 60).toLong()
+                        if (elapsedMins >= 1L) {
+                            repository.awardXpAndStudyMinutes(
+                                addedXp = (elapsedMins * 2L).coerceIn(10L, 300L),
+                                addedStudyMinutes = elapsedMins
+                            )
+                        }
+                        _liveFocusSession.value = LiveFocusSessionState(
+                            motivationalQuote = profile.focusMotivationQuote.ifBlank { DEFAULT_FOCUS_QUOTE }
+                        )
+                    }
+                }
+
+                delay(1000L)
+            }
+        }
     }
 
     fun clearSnackbar() {
@@ -142,6 +315,225 @@ class LifeViewModel(
 
     private fun currentProfileOrDefault(): UserProfile =
         (profileState.value as? UiState.Success)?.data ?: UserProfile()
+
+    // --- FOCUS MODE & TIME SLOT ACTIONS ---
+
+    fun toggleFocusMode(enabled: Boolean) {
+        val profile = currentProfileOrDefault()
+        val slots = (timeSlotsState.value as? UiState.Success)?.data.orEmpty()
+        val activeSlot = slots.firstOrNull { isTimeSlotActiveNow(it) }
+
+        viewModelScope.launch {
+            repository.updateProfile { it.copy(focusModeEnabled = enabled) }
+                .onSuccess {
+                    if (enabled) {
+                        val blocked = buildList {
+                            addAll(parsePackageCsv(profile.globalBlockedPackagesCsv))
+                            activeSlot?.let { addAll(parsePackageCsv(it.blockedPackagesCsv)) }
+                        }.distinct()
+                        val usePomodoro = activeSlot?.pomodoroEnabled ?: true
+                        _liveFocusSession.update {
+                            it.copy(
+                                isOverlayOpen = true,
+                                isActive = true,
+                                isManualFocus = true,
+                                activeSlotId = activeSlot?.id,
+                                activeSlotTitle = activeSlot?.title ?: "Deep Focus Mode",
+                                pomodoroEnabled = usePomodoro,
+                                countdownEnabled = activeSlot?.countdownEnabled ?: (activeSlot != null),
+                                pomodoroIsBreak = false,
+                                pomodoroRemainingSeconds = POMODORO_FOCUS_SECONDS,
+                                pomodoroRunning = usePomodoro,
+                                slotRemainingSeconds = activeSlot?.let { s -> remainingSecondsInSlot(s) } ?: 0,
+                                elapsedFocusSeconds = 0,
+                                blockedPackages = blocked,
+                                motivationalQuote = activeSlot?.motivationalQuote?.takeIf { q -> q.isNotBlank() }
+                                    ?: profile.focusMotivationQuote.ifBlank { DEFAULT_FOCUS_QUOTE }
+                            )
+                        }
+                        _snackbarMessage.value = "Focus Mode ON • ${blocked.size} apps shielded"
+                    } else {
+                        val elapsedMins = (_liveFocusSession.value.elapsedFocusSeconds / 60).toLong()
+                        if (elapsedMins >= 1L) {
+                            val xpGain = (elapsedMins * 2L).coerceIn(10L, 300L)
+                            repository.awardXpAndStudyMinutes(xpGain, elapsedMins)
+                            _snackbarMessage.value = "Focus ended • ${elapsedMins}m study saved (+$xpGain XP)"
+                        } else {
+                            _snackbarMessage.value = "Focus Mode turned OFF"
+                        }
+                        _liveFocusSession.update { it.copy(isOverlayOpen = false, isManualFocus = false, pomodoroRunning = false) }
+                    }
+                }
+                .onFailure {
+                    _snackbarMessage.value = it.localizedMessage ?: "Could not toggle Focus Mode."
+                }
+        }
+    }
+
+    fun openFocusOverlay() {
+        val profile = currentProfileOrDefault()
+        val slots = (timeSlotsState.value as? UiState.Success)?.data.orEmpty()
+        val activeSlot = slots.firstOrNull { isTimeSlotActiveNow(it) }
+        val blocked = buildList {
+            addAll(parsePackageCsv(profile.globalBlockedPackagesCsv))
+            activeSlot?.let { addAll(parsePackageCsv(it.blockedPackagesCsv)) }
+        }.distinct()
+
+        _liveFocusSession.update {
+            it.copy(
+                isOverlayOpen = true,
+                isActive = profile.focusModeEnabled || activeSlot != null,
+                activeSlotId = activeSlot?.id,
+                activeSlotTitle = activeSlot?.title ?: "Deep Focus Mode",
+                blockedPackages = blocked,
+                motivationalQuote = activeSlot?.motivationalQuote?.takeIf { q -> q.isNotBlank() }
+                    ?: profile.focusMotivationQuote.ifBlank { DEFAULT_FOCUS_QUOTE }
+            )
+        }
+    }
+
+    fun minimizeFocusOverlay() {
+        _liveFocusSession.update { it.copy(isOverlayOpen = false) }
+    }
+
+    fun endFocusAndLogStudy() {
+        val elapsedMins = (_liveFocusSession.value.elapsedFocusSeconds / 60).toLong()
+        val activeSlotId = _liveFocusSession.value.activeSlotId
+        viewModelScope.launch {
+            repository.updateProfile { it.copy(focusModeEnabled = false) }
+            if (activeSlotId != null) {
+                val slots = (timeSlotsState.value as? UiState.Success)?.data.orEmpty()
+                val slot = slots.firstOrNull { it.id == activeSlotId }
+                if (slot != null && slot.enabled) {
+                    repository.upsertTimeSlot(slot.copy(enabled = false))
+                }
+            }
+            if (elapsedMins >= 1L) {
+                val xpGain = (elapsedMins * 2L).coerceIn(10L, 300L)
+                repository.awardXpAndStudyMinutes(xpGain, elapsedMins)
+                _snackbarMessage.value = "Great focus! Logged ${elapsedMins}m (+$xpGain XP)"
+            } else {
+                _snackbarMessage.value = "Focus session ended."
+            }
+            _liveFocusSession.value = LiveFocusSessionState(
+                motivationalQuote = currentProfileOrDefault().focusMotivationQuote.ifBlank { DEFAULT_FOCUS_QUOTE }
+            )
+        }
+    }
+
+    fun toggleLivePomodoroRunning() {
+        _liveFocusSession.update { state ->
+            state.copy(pomodoroRunning = !state.pomodoroRunning)
+        }
+    }
+
+    fun switchLivePomodoroPhase() {
+        _liveFocusSession.update { state ->
+            val nextBreak = !state.pomodoroIsBreak
+            state.copy(
+                pomodoroIsBreak = nextBreak,
+                pomodoroRemainingSeconds = if (nextBreak) POMODORO_BREAK_SECONDS else POMODORO_FOCUS_SECONDS
+            )
+        }
+    }
+
+    fun cycleMotivationalQuote() {
+        val current = _liveFocusSession.value.motivationalQuote
+        val idx = STUDY_MOTIVATIONAL_QUOTES.indexOf(current)
+        val next = STUDY_MOTIVATIONAL_QUOTES[(idx + 1) % STUDY_MOTIVATIONAL_QUOTES.size]
+        updateFocusMotivationQuote(next)
+    }
+
+    fun updateFocusMotivationQuote(quote: String) {
+        val clean = quote.trim().take(180)
+        if (clean.isEmpty()) return
+        _liveFocusSession.update { it.copy(motivationalQuote = clean) }
+        viewModelScope.launch {
+            repository.updateProfile { it.copy(focusMotivationQuote = clean) }
+        }
+    }
+
+    fun saveTimeSlot(slot: StudyTimeSlot) {
+        viewModelScope.launch {
+            repository.upsertTimeSlot(slot)
+                .onSuccess {
+                    _snackbarMessage.value = "Saved time slot: ${slot.title}"
+                }
+                .onFailure {
+                    _snackbarMessage.value = it.localizedMessage ?: "Could not save time slot."
+                }
+        }
+    }
+
+    fun deleteTimeSlot(slotId: String) {
+        viewModelScope.launch {
+            repository.deleteTimeSlot(slotId)
+                .onSuccess { _snackbarMessage.value = "Time slot removed." }
+                .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Could not delete time slot." }
+        }
+    }
+
+    fun toggleTimeSlotEnabled(slot: StudyTimeSlot) {
+        val nextEnabled = !slot.enabled
+        viewModelScope.launch {
+            repository.upsertTimeSlot(slot.copy(enabled = nextEnabled))
+                .onSuccess {
+                    if (!nextEnabled) {
+                        autoOpenedSlotIds.remove(slot.id)
+                    }
+                    _snackbarMessage.value = if (nextEnabled) {
+                        "${slot.title} armed for auto-block"
+                    } else {
+                        "${slot.title} paused"
+                    }
+                }
+        }
+    }
+
+    fun toggleTimeSlotPomodoro(slot: StudyTimeSlot) {
+        viewModelScope.launch {
+            repository.upsertTimeSlot(slot.copy(pomodoroEnabled = !slot.pomodoroEnabled))
+        }
+    }
+
+    fun toggleTimeSlotCountdown(slot: StudyTimeSlot) {
+        viewModelScope.launch {
+            repository.upsertTimeSlot(slot.copy(countdownEnabled = !slot.countdownEnabled))
+        }
+    }
+
+    fun updateTimeSlotBlockedApps(slot: StudyTimeSlot, selectedPackages: Set<String>) {
+        viewModelScope.launch {
+            repository.upsertTimeSlot(slot.copy(blockedPackagesCsv = toPackageCsv(selectedPackages)))
+                .onSuccess {
+                    _snackbarMessage.value = "${selectedPackages.size} apps linked to ${slot.title}"
+                }
+        }
+    }
+
+    fun updateGlobalBlockedApps(selectedPackages: Set<String>) {
+        viewModelScope.launch {
+            repository.updateProfile { it.copy(globalBlockedPackagesCsv = toPackageCsv(selectedPackages)) }
+                .onSuccess {
+                    _snackbarMessage.value = "${selectedPackages.size} apps selected for blocking"
+                }
+        }
+    }
+
+    fun removeGlobalBlockedApp(packageName: String) {
+        val current = parsePackageCsv(currentProfileOrDefault().globalBlockedPackagesCsv).toMutableSet()
+        if (current.remove(packageName)) {
+            updateGlobalBlockedApps(current)
+        }
+    }
+
+    fun updateDailyStudyTargetHours(hours: Int) {
+        val boundedMins = (hours.coerceIn(1, 16) * 60).toLong()
+        viewModelScope.launch {
+            repository.updateProfile { it.copy(dailyStudyTargetMinutes = boundedMins) }
+                .onSuccess { _snackbarMessage.value = "Daily study target set to ${hours}h" }
+        }
+    }
 
     // --- PROFILE ACTIONS ---
 
@@ -203,7 +595,7 @@ class LifeViewModel(
         viewModelScope.launch {
             _sessionJapCount.value = 0
             repository.resetTodayCounters()
-                .onSuccess { _snackbarMessage.value = "Today's Naam Jap & Water counters reset." }
+                .onSuccess { _snackbarMessage.value = "Today's counters reset." }
                 .onFailure { _snackbarMessage.value = it.localizedMessage ?: "Could not reset counters." }
         }
     }
@@ -573,5 +965,6 @@ class LifeViewModel(
     override fun onCleared() {
         super.onCleared()
         timerJob?.cancel()
+        focusEngineJob?.cancel()
     }
 }

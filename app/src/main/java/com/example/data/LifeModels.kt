@@ -3,6 +3,12 @@ package com.example.data
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
+const val DEFAULT_BLOCKED_PACKAGES_CSV =
+    "com.google.android.youtube,com.instagram.android,com.whatsapp,com.android.chrome,com.zhiliaoapp.musically,com.facebook.katana,com.twitter.android"
+
+const val DEFAULT_FOCUS_QUOTE =
+    "Discipline beats motivation. Stay focused now and build your future."
+
 sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
     data class Success<T>(val data: T) : UiState<T>
@@ -20,6 +26,11 @@ data class UserProfile(
     val xp: Long = 0L,
     val streakDays: Long = 1L,
     val totalStudyMinutes: Long = 0L,
+    val todayStudyMinutes: Long = 0L,
+    val dailyStudyTargetMinutes: Long = 480L,
+    val focusModeEnabled: Boolean = false,
+    val globalBlockedPackagesCsv: String = DEFAULT_BLOCKED_PACKAGES_CSV,
+    val focusMotivationQuote: String = DEFAULT_FOCUS_QUOTE,
     val totalNaamJapCount: Long = 0L,
     val todayNaamJapCount: Long = 0L,
     val todayMalas: Long = 0L,
@@ -28,6 +39,24 @@ data class UserProfile(
     val todaySleepHours: Double = 7.0,
     val motivationMode: Boolean = true,
     val lastActiveDate: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "study_time_slots")
+data class StudyTimeSlot(
+    @PrimaryKey val id: String = "",
+    val userId: String = "local_user",
+    val title: String = "Study Session 1",
+    val startHour: Int = 19,
+    val startMinute: Int = 0,
+    val endHour: Int = 22,
+    val endMinute: Int = 0,
+    val enabled: Boolean = true,
+    val pomodoroEnabled: Boolean = true,
+    val countdownEnabled: Boolean = true,
+    val blockedPackagesCsv: String = DEFAULT_BLOCKED_PACKAGES_CSV,
+    val motivationalQuote: String = DEFAULT_FOCUS_QUOTE,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )

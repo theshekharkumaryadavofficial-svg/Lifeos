@@ -8,6 +8,8 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -21,6 +23,19 @@ interface LifeDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertProfile(profile: UserProfile)
+
+    // Study Time Slots
+    @Query("SELECT * FROM study_time_slots ORDER BY startHour ASC, startMinute ASC, createdAt ASC")
+    fun observeTimeSlots(): Flow<List<StudyTimeSlot>>
+
+    @Query("SELECT * FROM study_time_slots ORDER BY startHour ASC, startMinute ASC, createdAt ASC")
+    suspend fun getTimeSlotsOnce(): List<StudyTimeSlot>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertTimeSlot(slot: StudyTimeSlot)
+
+    @Query("DELETE FROM study_time_slots WHERE id = :slotId")
+    suspend fun deleteTimeSlot(slotId: String)
 
     // Tasks
     @Query("SELECT * FROM life_tasks ORDER BY createdAt DESC")
@@ -86,13 +101,14 @@ interface LifeDao {
 @Database(
     entities = [
         UserProfile::class,
+        StudyTimeSlot::class,
         LifeTask::class,
         StudySubject::class,
         StudyNote::class,
         WorkoutLog::class,
         SadhanaLog::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class LifeDatabase : RoomDatabase() {
@@ -102,13 +118,55 @@ abstract class LifeDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: LifeDatabase? = null
 
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN todayStudyMinutes INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN dailyStudyTargetMinutes INTEGER NOT NULL DEFAULT 480"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN focusModeEnabled INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN globalBlockedPackagesCsv TEXT NOT NULL DEFAULT '$DEFAULT_BLOCKED_PACKAGES_CSV'"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_profile ADD COLUMN focusMotivationQuote TEXT NOT NULL DEFAULT '$DEFAULT_FOCUS_QUOTE'"
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS study_time_slots (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        userId TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        startHour INTEGER NOT NULL,
+                        startMinute INTEGER NOT NULL,
+                        endHour INTEGER NOT NULL,
+                        endMinute INTEGER NOT NULL,
+                        enabled INTEGER NOT NULL,
+                        pomodoroEnabled INTEGER NOT NULL,
+                        countdownEnabled INTEGER NOT NULL,
+                        blockedPackagesCsv TEXT NOT NULL,
+                        motivationalQuote TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun getInstance(context: Context): LifeDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     LifeDatabase::class.java,
                     "lifeos_local.db"
-                ).fallbackToDestructiveMigration(dropAllTables = false)
+                )
+                    .addMigrations(MIGRATION_1_2)
+                    .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { INSTANCE = it }
             }
